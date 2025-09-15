@@ -5,7 +5,38 @@ from exo import DRAM, instr
 from exo.core.memory import MemGenError, StaticMemory
 from exo.stdlib.stdlib import stride
 
-class APPLE_AMX_INPUT(StaticMemory):
+class _APPLE_AMX_POOL(StaticMemory):
+  z_row_dict = {}
+  global_set = False
+  is_active = False
+  
+  @classmethod
+  def global_(cls):
+    if not _APPLE_AMX_POOL.global_set:
+      _APPLE_AMX_POOL.global_set = True
+      return '#include "amx.h"'
+    return ""
+
+  @classmethod
+  def can_read(cls):
+    return False
+
+  @classmethod
+  def set_if_inactive(cls):
+    if not _APPLE_AMX_POOL.is_active:
+      _APPLE_AMX_POOL.is_active = True
+      return "AMX_SET()\n"
+    return ""
+  
+  @classmethod
+  def clr_if_empty_z(cls):
+    if _APPLE_AMX_POOL.z_row_dict == {}:
+      _APPLE_AMX_POOL.is_active = False
+      _APPLE_AMX_POOL.init_state(len(cls.is_chunk_allocated))
+      return "\nAMX_CLR()"
+    return ""
+
+class _APPLE_AMX_INPUT(_APPLE_AMX_POOL):
   NUM_ROWS = 8
   StaticMemory.init_state(NUM_ROWS)
   row_dict = {}
@@ -15,11 +46,9 @@ class APPLE_AMX_INPUT(StaticMemory):
     cls.is_chunk_allocated = copy(cls.is_chunk_allocated)
     cls.row_dict = {}
 
-  def global_():
-    return '#include "amx.h"'
-
   @classmethod
   def alloc(cls, new_name, prim_type, shape, srcinfo):
+    set_if_inactive = cls.set_if_inactive()
     if len(shape) != 1:
       raise MemGenError(f"Can only allocate a single vector!")
     ctype_size = {"_Float16": 2, "float": 4, "double": 4, "int16_t": 2, "int32_t": 4, "int_fast32_t": 4} # TODO: "int8_t": 1,
@@ -28,33 +57,26 @@ class APPLE_AMX_INPUT(StaticMemory):
     row_idx = cls.find_free_chunk()
     cls.mark(row_idx)
     cls.row_dict[new_name] = row_idx
-    return f"#define {new_name} {row_idx}"
+    return f"{set_if_inactive}#define {new_name} {row_idx}"
   
   @classmethod
   def free(cls, new_name, prim_type, shape, srcinfo):
     row_idx = cls.row_dict[new_name]
     del cls.row_dict[new_name]
     cls.unmark(row_idx)
-    return f"#undef {new_name}"
-  
-  @classmethod
-  def can_read(cls):
-    return False
+    return f"#undef {new_name}{cls.clr_if_empty_z()}"
 
-class APPLE_AMX_POOL_X(APPLE_AMX_INPUT):
-  pass
+class APPLE_AMX_POOL_X(_APPLE_AMX_INPUT): pass
+class APPLE_AMX_POOL_Y(_APPLE_AMX_INPUT): pass
 
-class APPLE_AMX_POOL_Y(APPLE_AMX_INPUT):
-  pass
-
-class APPLE_AMX_POOL_Z(StaticMemory):
+class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
   NUM_ROWS = 64
   StaticMemory.init_state(NUM_ROWS)
-  row_dict = {}
   ctype_size = {"_Float": 2, "float": 4, "double": 4, "int16_t": 2, "int32_t": 4, "int_fast32_t": 4}
 
   @classmethod
   def alloc(cls, new_name, prim_type, shape, srcinfo):
+    set_if_inactive = cls.set_if_inactive()
     match shape:
       case [*_, n] if int(n) * cls.ctype_size[prim_type] != 64:
         # TODO: i32 can actually be accumulated into i32[32][32] using mac16
@@ -62,7 +84,7 @@ class APPLE_AMX_POOL_Z(StaticMemory):
       case [_]:
         row_idx = cls.find_free_chunk()
         cls.mark(row_idx)
-        cls.row_dict[new_name] = row_idx
+        cls.z_row_dict[new_name] = row_idx
       case [n_rows, n_cols] if n_rows == n_cols:
         n_rows = int(n_rows)
         n_accumulators = 64 // n_rows
@@ -74,26 +96,18 @@ class APPLE_AMX_POOL_Z(StaticMemory):
         else:
           raise MemGenError("Not enough space to allocate!")
         for row in rows: cls.mark(row)
-        cls.row_dict[new_name] = row_idx
+        cls.z_row_dict[new_name] = row_idx
       case [_, _]:
         raise MemGenError("Number of matrix rows and columns must be the same!")
       case _:
         raise MemGenError("Can only allocate a vector or matrix!")
-    return f"#define {new_name} {row_idx}"
+    return f"{set_if_inactive}#define {new_name} {row_idx}"
 
   @classmethod
   def free(cls, new_name, prim_type, shape, srcinfo):
-    row_idx = cls.row_dict[new_name]
-    del cls.row_dict[new_name]
-    match shape:
-      case [_]:
-        rows = iter((row_idx,))
-      case [n_rows, _]:
-        n_rows = int(n_rows)
-        n_accumulators = 64 // n_rows
-        rows = range(row_idx, row_idx + n_accumulators * n_rows, n_accumulators)
-    for row in rows: cls.unmark(row)
-    return f"#undef {new_name}"
+    del cls.z_row_dict[new_name]
+    # free list is unmarked during AMX_CLR()
+    return f"#undef {new_name}{cls.clr_if_empty_z()}"
 
   @classmethod
   def window(cls, basetyp, baseptr, indices, strides, srcinfo):
@@ -106,11 +120,7 @@ class APPLE_AMX_POOL_Z(StaticMemory):
     assert len(shape) == 2
     # TODO: assert indices[1] is not relevant
     n_accumulators = 64 // shape[0].val # NOTE: This is the physical stride
-    return f"{cls.row_dict[baseptr]} + {indices[0]} * {n_accumulators}"
-
-  @classmethod
-  def can_read(cls):
-    return False
+    return f"{cls.z_row_dict[baseptr]} + {indices[0]} * {n_accumulators}"
 
 @instr("AMX_LDX({src_data}, {dst_data}, 0)")
 def apple_amx_ldx_f32(dst: f32[16] @ APPLE_AMX_POOL_X, src: f32[16] @ DRAM):

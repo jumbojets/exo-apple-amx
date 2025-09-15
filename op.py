@@ -22,20 +22,3 @@ def outer_product(A: f32[16] @ DRAM, B: f32[16] @ DRAM, C: f32[16, 16] @ DRAM):
   for i in seq(0, 16): apple_amx_stz_f32(C[i, :], c[i, :])
 
 print(outer_product)
-
-'''
-void outer_product( void *ctxt, const float* A, const float* B, float* C ) {
-#define a 0
-#define b 0
-#define c 0
-AMX_LDX((A), (a), 0)
-AMX_LDY((B), (b), 0)
-AMX_FMA32((a), (b), (c), 0)
-#undef b
-#undef a
-for (int_fast32_t i = 0; i < 16; i++) {
-  AMX_STZ(C[(i) * (16)], 0 + i * 4, 0)
-}
-#undef c
-}
-'''

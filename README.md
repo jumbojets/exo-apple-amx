@@ -1,5 +1,5 @@
 some considerations / todos
-* what to do about AMX_SET and AMX_CLR and general considerations regarding reusing registers in the Z tile
+* the AMX_SET/AMX_CLR and Z register solution made code a little less readable. try to address
 * mixed width
 * all ops
 * useful rewrite rules
