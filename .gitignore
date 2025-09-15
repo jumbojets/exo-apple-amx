@@ -3,3 +3,5 @@ __pycache__
 build
 appleamx.egg-info
 op.[cdh]
+op
+*.o

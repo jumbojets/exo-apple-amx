@@ -25,7 +25,7 @@ class _APPLE_AMX_POOL(StaticMemory):
   def set_if_inactive(cls):
     if not _APPLE_AMX_POOL.is_active:
       _APPLE_AMX_POOL.is_active = True
-      return "AMX_SET()\n"
+      return "AMX_SET();\n"
     return ""
   
   @classmethod
@@ -33,7 +33,7 @@ class _APPLE_AMX_POOL(StaticMemory):
     if _APPLE_AMX_POOL.z_row_dict == {}:
       _APPLE_AMX_POOL.is_active = False
       _APPLE_AMX_POOL.init_state(len(cls.is_chunk_allocated))
-      return "\nAMX_CLR()"
+      return "\nAMX_CLR();"
     return ""
 
 class _APPLE_AMX_INPUT(_APPLE_AMX_POOL):
@@ -122,25 +122,25 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
     n_accumulators = 64 // shape[0].val # NOTE: This is the physical stride
     return f"{cls.z_row_dict[baseptr]} + {indices[0]} * {n_accumulators}"
 
-@instr("AMX_LDX({src_data}, {dst_data}, 0)")
+@instr("AMX_LDX(&{src_data}, {dst_data} * 64, 0);")
 def apple_amx_ldx_f32(dst: f32[16] @ APPLE_AMX_POOL_X, src: f32[16] @ DRAM):
   assert stride(dst, 0) == 1
   assert stride(src, 0) == 1
   for i in seq(0, 16): dst[i] = src[i]
 
-@instr("AMX_LDY({src_data}, {dst_data}, 0)")
+@instr("AMX_LDY(&{src_data}, {dst_data} * 64, 0);")
 def apple_amx_ldy_f32(dst: f32[16] @ APPLE_AMX_POOL_Y, src: f32[16] @ DRAM):
   assert stride(dst, 0) == 1
   assert stride(src, 0) == 1
   for i in seq(0, 16): dst[i] = src[i]
 
-@instr("AMX_STZ({dst_data}, {src_data}, 0)")
+@instr("AMX_STZ(&{dst_data}, {src_data}, 0);")
 def apple_amx_stz_f32(dst: [f32][16] @ DRAM, src: [f32][16] @ APPLE_AMX_POOL_Z):
   assert stride(dst, 0) == 1
   assert stride(src, 0) == 1
   for i in seq(0, 16): dst[i] = src[i]
 
-@instr("AMX_FMA32({srcx_data}, {srcy_data}, {dst_data}, 0)")
+@instr("AMX_FMA32({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 0);")
 def apple_amx_fma32_mat(dst: f32[16, 16] @ APPLE_AMX_POOL_Z, srcx: f32[16] @ APPLE_AMX_POOL_X, srcy: f32[16] @ APPLE_AMX_POOL_Y):
   # TODO: I don't understand why I need to assert the strides for items in registers and if this is correct
   assert stride(dst, 1) == 1
