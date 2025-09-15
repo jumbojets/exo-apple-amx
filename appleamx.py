@@ -123,13 +123,13 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
     return f"{cls.z_row_dict[baseptr]} + {indices[0]} * {n_accumulators}"
 
 @instr("AMX_LDX(&{src_data}, {dst_data} * 64, 0);")
-def apple_amx_ldx_f32(dst: f32[16] @ APPLE_AMX_POOL_X, src: f32[16] @ DRAM):
+def apple_amx_ldx_f32(dst: f32[16] @ APPLE_AMX_POOL_X, src: [f32][16] @ DRAM):
   assert stride(dst, 0) == 1
   assert stride(src, 0) == 1
   for i in seq(0, 16): dst[i] = src[i]
 
 @instr("AMX_LDY(&{src_data}, {dst_data} * 64, 0);")
-def apple_amx_ldy_f32(dst: f32[16] @ APPLE_AMX_POOL_Y, src: f32[16] @ DRAM):
+def apple_amx_ldy_f32(dst: f32[16] @ APPLE_AMX_POOL_Y, src: [f32][16] @ DRAM):
   assert stride(dst, 0) == 1
   assert stride(src, 0) == 1
   for i in seq(0, 16): dst[i] = src[i]
