@@ -1,19 +1,19 @@
 CPPFLAGS += -I.
 CFLAGS ?= -march=native
 
-op: op.o main.o
+appleamx_matmul: appleamx_matmul.o main.o
 
 appleamx.py:
 	pip install .
 
-op.c: op.py appleamx.py
+appleamx_matmul.c: appleamx_matmul.py appleamx.py
 	exocc -o . --stem $(*F) $^
 
-op.o: amx.h
+appleamx_matmul.o: amx.h
 
-main.c: op.c
+main.c: appleamx_matmul.c
 
 .PHONY: clean
 clean:
-	$(RM) op op.[cdh] *.o exo_demo
+	$(RM) appleamx_matmul appleamx_matmul.[cdh] *.o exo_demo
 	$(RM) -r __pycache__/

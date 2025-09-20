@@ -1,7 +1,16 @@
+# exo-apple-amx
+
+### Matmul performance
+
+```
+Unscheduled:      0.581 gflops
+Scheduled:      838.861 gflops
+```
+
 some considerations / todos
-* the AMX_SET/AMX_CLR and Z register solution made code a little less readable. try to address
+* two accumulators in appleamx_matmul.py
+* some of the matrix stuff can be consolidated more nicely in the APPLE_AMX_POOL
 * mixed width
 * all ops
 * useful rewrite rules
-* gemm example
 * address TODOs (mostly have to do with strides)

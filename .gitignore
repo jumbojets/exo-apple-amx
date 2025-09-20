@@ -2,6 +2,6 @@
 __pycache__
 build
 appleamx.egg-info
-op.[cdh]
-op
+appleamx_matmul.[cdh]
+appleamx_matmul
 *.o
