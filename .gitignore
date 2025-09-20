@@ -4,4 +4,5 @@ build
 appleamx.egg-info
 appleamx_matmul.[cdh]
 appleamx_matmul
+*.install
 *.o

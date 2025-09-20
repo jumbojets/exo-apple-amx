@@ -1,6 +1,19 @@
 # exo-apple-amx
 
-### Matmul performance
+### Install appleamx
+
+```console
+$ pip install .
+```
+
+### Run appleamx_matmul.py example
+
+```console
+$ make
+$ ./appleamx_matmul
+```
+
+### appleamx_matmul.py performance
 
 ```
 Unscheduled:      0.581 gflops
