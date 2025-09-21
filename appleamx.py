@@ -57,7 +57,7 @@ class _APPLE_AMX_POOL(StaticMemory):
     cls.row_dict[new_name] = row_idx
     return f"{set_if_inactive}#define {new_name} {row_idx}"
   
-  # TDOO: don't take matrix cols?
+  # TODO: don't take matrix cols?
   @classmethod
   def matrix_rows(cls, n_rows, n_cols):
     ...
@@ -162,7 +162,7 @@ def apple_amx_stz_f16(dst: [f16][32] @ DRAM, src: [f16][32] @ APPLE_AMX_POOL_Z):
   for i in seq(0, 32): dst[i] = src[i]
 
 @instr("AMX_FMA16({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 0);")
-def apple_amx_fma16_mat(dst: f16[32, 32] @ APPLE_AMX_POOL_Z, srcx: [f16][32] @ APPLE_AMX_POOL_X, srcy: [f16][32] @ APPLE_AMX_POOL_Y):
+def apple_amx_fma16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z, srcx: [f16][32] @ APPLE_AMX_POOL_X, srcy: [f16][32] @ APPLE_AMX_POOL_Y):
   # TODO: I don't understand why I need to assert the strides for items in registers and if this is correct
   assert stride(dst, 1) == 1
   assert stride(srcx, 0) == 1
