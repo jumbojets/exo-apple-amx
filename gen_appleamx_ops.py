@@ -22,7 +22,7 @@ def apple_amx_st${pool_lower}_${dtype}(dst: [$dtype][$N] @ DRAM, src: [$dtype][$
     for i in seq(0, $N):
         dst[i] = src[i]''')
 
-FMA_TPL = Template(r'''
+FMA_MAT_TML = Template(r'''
 @instr("AMX_FMA${type_bits}({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 0);")
 def apple_amx_fma${type_bits}_mat(dst: [$dtype][$N, $N] @ APPLE_AMX_POOL_Z, srcx: [$dtype][$N] @ APPLE_AMX_POOL_X, srcy: [$dtype][$N] @ APPLE_AMX_POOL_Y):
   assert stride(dst, 1) == 1
@@ -31,6 +31,15 @@ def apple_amx_fma${type_bits}_mat(dst: [$dtype][$N, $N] @ APPLE_AMX_POOL_Z, srcx
   for i in seq(0, $N):
     for j in seq(0, $N):
       dst[i, j] += srcx[i] * srcy[j]''')
+
+FMA_VEC_TPL = Template(r'''
+@instr("AMX_FMA${type_bits}({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 1 << 63);")
+def apple_amx_fma${type_bits}_vec(dst: [$dtype][$N] @ APPLE_AMX_POOL_Z, srcx: [$dtype][$N] @ APPLE_AMX_POOL_X, srcy: [$dtype][$N] @ APPLE_AMX_POOL_Y):
+  assert stride(dst, 0) == 1
+  assert stride(srcx, 0) == 1
+  assert stride(srcy, 0) == 1
+  for i in seq(0, $N):
+    dst[i] += srcx[i] * srcy[i]''')
 
 def main():
   out = []
@@ -48,7 +57,8 @@ def main():
 
   for dtype in ("f16", "f32", "f64"):
     opts = {"type_bits": TYPE_BYTES[dtype] * 8, "dtype": dtype, "N": lanes(dtype)}
-    out.append(FMA_TPL.substitute(opts))
+    out.append(FMA_MAT_TML.substitute(opts))
+    out.append(FMA_VEC_TPL.substitute(opts))
 
   Path("appleamx_ops.py").write_text("\n".join(out))
 

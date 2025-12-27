@@ -44,6 +44,6 @@ $ python gen_appleamx_ops.py
 * some of the matrix stuff can be consolidated more nicely in the APPLE_AMX_POOL
 * accumulator (3rd) dimension for z pool (and maybe even x, y)?
 * mixed width
-* all ops
+* mixed precision ops (and integers)
 * predefine useful rewrite rules
 * address TODOs (mostly have to do with strides)

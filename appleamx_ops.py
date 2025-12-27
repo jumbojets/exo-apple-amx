@@ -223,6 +223,14 @@ def apple_amx_fma16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z, srcx: [f16][32] @
     for j in seq(0, 32):
       dst[i, j] += srcx[i] * srcy[j]
 
+@instr("AMX_FMA16({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 1 << 63);")
+def apple_amx_fma16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcx: [f16][32] @ APPLE_AMX_POOL_X, srcy: [f16][32] @ APPLE_AMX_POOL_Y):
+  assert stride(dst, 0) == 1
+  assert stride(srcx, 0) == 1
+  assert stride(srcy, 0) == 1
+  for i in seq(0, 32):
+    dst[i] += srcx[i] * srcy[i]
+
 @instr("AMX_FMA32({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 0);")
 def apple_amx_fma32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z, srcx: [f32][16] @ APPLE_AMX_POOL_X, srcy: [f32][16] @ APPLE_AMX_POOL_Y):
   assert stride(dst, 1) == 1
@@ -232,6 +240,14 @@ def apple_amx_fma32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z, srcx: [f32][16] @
     for j in seq(0, 16):
       dst[i, j] += srcx[i] * srcy[j]
 
+@instr("AMX_FMA32({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 1 << 63);")
+def apple_amx_fma32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcx: [f32][16] @ APPLE_AMX_POOL_X, srcy: [f32][16] @ APPLE_AMX_POOL_Y):
+  assert stride(dst, 0) == 1
+  assert stride(srcx, 0) == 1
+  assert stride(srcy, 0) == 1
+  for i in seq(0, 16):
+    dst[i] += srcx[i] * srcy[i]
+
 @instr("AMX_FMA64({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 0);")
 def apple_amx_fma64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z, srcx: [f64][8] @ APPLE_AMX_POOL_X, srcy: [f64][8] @ APPLE_AMX_POOL_Y):
   assert stride(dst, 1) == 1
@@ -240,3 +256,11 @@ def apple_amx_fma64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z, srcx: [f64][8] @ AP
   for i in seq(0, 8):
     for j in seq(0, 8):
       dst[i, j] += srcx[i] * srcy[j]
+
+@instr("AMX_FMA64({srcx_data} * 64, {srcy_data} * 64, {dst_data}, 1 << 63);")
+def apple_amx_fma64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcx: [f64][8] @ APPLE_AMX_POOL_X, srcy: [f64][8] @ APPLE_AMX_POOL_Y):
+  assert stride(dst, 0) == 1
+  assert stride(srcx, 0) == 1
+  assert stride(srcy, 0) == 1
+  for i in seq(0, 8):
+    dst[i] += srcx[i] * srcy[i]
