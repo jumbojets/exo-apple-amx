@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     author="James Taylor",
     python_requires=">=3.9",
-    py_modules=["appleamx"],
+    py_modules=["appleamx", "appleamx_ops", "appleamx_pools"],
     install_requires=[
         "exo-lang>=1.0.0",
     ],
