@@ -17,6 +17,7 @@ plus the one mixed-precision mode Exo can express, f16 inputs accumulated in f32
 """
 import sys
 from collections import namedtuple
+from functools import partial
 from pathlib import Path
 
 OUTPUT = Path(__file__).with_name("appleamx_ops.py")
@@ -31,8 +32,7 @@ MEMS = {"DRAM": "DRAM", "X": "APPLE_AMX_POOL_X", "Y": "APPLE_AMX_POOL_Y", "Z": "
 # affects the write mask, and 1-byte types borrow the 16-bit setting.
 EXTRH_LANE_MODE = {8: 0, 4: 1, 2: 2, 1: 2}
 
-# A `size` parameter has dtype None. Records rather than strings so that
-# test_appleamx_ops.py can build test procs and C drivers from them.
+# A `size` parameter has dtype None.
 Param = namedtuple("Param", "name dtype shape mem", defaults=(None, (), "DRAM"))
 Op = namedtuple("Op", "name c params body asserts")
 OPS = []
@@ -65,37 +65,31 @@ def render_op(o):
   lines += [f"  {line}" for line in o.body]
   return "\n".join(lines)
 
+def move(name, c, dtype, shape, dst="DRAM", src="DRAM", asserts=()):
+  """dst = src, rows of `shape` in the given memories, contiguous along the row."""
+  ix = ", ".join("ij"[:len(shape)])
+  row = len(shape) - 1
+  op(name, c, [Param("dst", dtype, shape, dst), Param("src", dtype, shape, src)],
+     loops(shape, f"dst[{ix}] = src[{ix}]"), unit_strides(("dst", row), ("src", row)) + list(asserts))
+
 # Loads, stores and register-to-register moves
 for dtype in TYPE_BYTES:
   N = lanes(dtype)
-  copy = loops([N], "dst[i] = src[i]")
-  copy_pair = loops([2, N], "dst[i, j] = src[i, j]")
   for pool in "XYZ":
     p = pool.lower()
-    op(f"apple_amx_ld{p}_{dtype}", f"AMX_LD{pool}(&{{src_data}}, ({{dst_data}}), 0);",
-       [Param("dst", dtype, (N,), pool), Param("src", dtype, (N,))],
-       copy, unit_strides(("dst", 0), ("src", 0)))
-    op(f"apple_amx_st{p}_{dtype}", f"AMX_ST{pool}(&{{dst_data}}, ({{src_data}}), 0);",
-       [Param("dst", dtype, (N,)), Param("src", dtype, (N,), pool)],
-       copy, unit_strides(("dst", 0), ("src", 0)))
+    move(f"apple_amx_ld{p}_{dtype}", f"AMX_LD{pool}(&{{src_data}}, ({{dst_data}}), 0);", dtype, (N,), dst=pool)
+    move(f"apple_amx_st{p}_{dtype}", f"AMX_ST{pool}(&{{dst_data}}, ({{src_data}}), 0);", dtype, (N,), src=pool)
   # The DRAM side of a pair load/store must be 128-byte aligned, which Exo cannot check.
   for pool in "XY":
     p = pool.lower()
-    op(f"apple_amx_ld{p}2_{dtype}", f"AMX_LD{pool}(&{{src_data}}, ({{dst_data}}), AMX_LDST_PAIR);",
-       [Param("dst", dtype, (2, N), pool), Param("src", dtype, (2, N))],
-       copy_pair, unit_strides(("dst", 1), ("src", 1)) + [f"stride(src, 0) == {N}"])
-    op(f"apple_amx_st{p}2_{dtype}", f"AMX_ST{pool}(&{{dst_data}}, ({{src_data}}), AMX_LDST_PAIR);",
-       [Param("dst", dtype, (2, N)), Param("src", dtype, (2, N), pool)],
-       copy_pair, unit_strides(("dst", 1), ("src", 1)) + [f"stride(dst, 0) == {N}"])
-  op(f"apple_amx_extrx_{dtype}", "AMX_EXTRX_FROM_Y(({dst_data}), ({src_data}));",
-     [Param("dst", dtype, (N,), "X"), Param("src", dtype, (N,), "Y")],
-     copy, unit_strides(("dst", 0), ("src", 0)))
-  op(f"apple_amx_extry_{dtype}", "AMX_EXTRY_FROM_X(({dst_data}), ({src_data}));",
-     [Param("dst", dtype, (N,), "Y"), Param("src", dtype, (N,), "X")],
-     copy, unit_strides(("dst", 0), ("src", 0)))
-  op(f"apple_amx_extrh_{dtype}", f"AMX_EXTRH(({{dst_data}}), ({{src_data}}), {EXTRH_LANE_MODE[TYPE_BYTES[dtype]]});",
-     [Param("dst", dtype, (N,), "X"), Param("src", dtype, (N,), "Z")],
-     copy, unit_strides(("dst", 0), ("src", 0)))
+    move(f"apple_amx_ld{p}2_{dtype}", f"AMX_LD{pool}(&{{src_data}}, ({{dst_data}}), AMX_LDST_PAIR);",
+         dtype, (2, N), dst=pool, asserts=[f"stride(src, 0) == {N}"])
+    move(f"apple_amx_st{p}2_{dtype}", f"AMX_ST{pool}(&{{dst_data}}, ({{src_data}}), AMX_LDST_PAIR);",
+         dtype, (2, N), src=pool, asserts=[f"stride(dst, 0) == {N}"])
+  move(f"apple_amx_extrx_{dtype}", "AMX_EXTRX_FROM_Y(({dst_data}), ({src_data}));", dtype, (N,), dst="X", src="Y")
+  move(f"apple_amx_extry_{dtype}", "AMX_EXTRY_FROM_X(({dst_data}), ({src_data}));", dtype, (N,), dst="Y", src="X")
+  move(f"apple_amx_extrh_{dtype}", f"AMX_EXTRH(({{dst_data}}), ({{src_data}}), {EXTRH_LANE_MODE[TYPE_BYTES[dtype]]});",
+       dtype, (N,), dst="X", src="Z")
 
 # Floating-point fused multiply-add family: kind -> (macro prefix, extra flags, Exo statement)
 ALU_KINDS = {
@@ -108,67 +102,53 @@ SKIP_ALL = ["AMX_SKIP_X", "AMX_SKIP_Y", "AMX_SKIP_Z"]  # fma with every input sk
 def alu_call(macro, flags):
   return f"{macro}(({{srcy_data}}) * 64, ({{srcx_data}}) * 64, ({{dst_data}}), {' | '.join(flags) or 0});"
 
-def alu_sources(dtype):
-  N = lanes(dtype)
-  return [Param("srcy", dtype, (N,), "Y"), Param("srcx", dtype, (N,), "X")], unit_strides(("srcy", 0), ("srcx", 0))
+def alu_ops(dtype, name, flags, masks, z, y, x, zdtype=None, suffix="", mode_flags=()):
+  """fma/fms/mul/zero of dtype rows from Y and X into a zdtype row or tile of Z, and the masked variants.
 
-def matrix_alu_ops(dtype, zdtype, suffix="", mode_flags=()):
-  """Outer products of dtype rows into an NxN zdtype accumulator: fma/fms/mul/zero and the masked variants."""
+  z, y and x are the operands of the Exo statement; `masks` maps the size parameter of each loop
+  to the flag that enables only that many lanes of its source."""
   N, B = lanes(dtype), bits(dtype)
-  dst = Param("dst", zdtype, (N, N), "Z")
-  srcs, src_strides = alu_sources(dtype)
-  for kind, (macro, flags, stmt) in ALU_KINDS.items():
-    flags = list(mode_flags) + flags
-    stmt = stmt.format(z="dst[i, j]", y="srcy[i]", x="srcx[j]")
-    op(f"apple_amx_{kind}{B}_mat{suffix}", alu_call(f"{macro}{B}", flags),
-       [dst] + srcs, loops([N, N], stmt),
-       unit_strides(("dst", 1)) + src_strides)
-    op(f"apple_amx_{kind}{B}_mat{suffix}_masked",
-       alu_call(f"{macro}{B}", flags + ["AMX_ENABLE_Y_FIRST({rows})", "AMX_ENABLE_X_FIRST({cols})"]),
-       [Param("rows"), Param("cols"), dst] + srcs,
-       loops([N, N], stmt, ["i < rows", "j < cols"]),
-       [f"rows <= {N}", "0 < rows", f"cols <= {N}", "0 < cols"] + unit_strides(("dst", 1)) + src_strides)
-  op(f"apple_amx_zero{B}_mat{suffix}", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {' | '.join(list(mode_flags) + SKIP_ALL)});",
-     [dst], loops([N, N], "dst[i, j] = 0.0"), unit_strides(("dst", 1)))
+  name, flags = f"{name}{suffix}", list(mode_flags) + flags
+  dims = (N,) * len(masks)
+  dst = Param("dst", zdtype or dtype, dims, "Z")
+  srcs = [Param("srcy", dtype, (N,), "Y"), Param("srcx", dtype, (N,), "X")]
+  dst_stride = unit_strides(("dst", len(dims) - 1))
+  strides = dst_stride + unit_strides(("srcy", 0), ("srcx", 0))
+  sizes = [Param(size) for size in masks]
+  enables = [f"{flag}({{{size}}})" for size, flag in masks.items()]
+  guards = [f"{var} < {size}" for var, size in zip("ij", masks)]
+  bounds = [a for size in masks for a in (f"{size} <= {N}", f"0 < {size}")]
+  for kind, (macro, kind_flags, stmt) in ALU_KINDS.items():
+    stmt = stmt.format(z=z, y=y, x=x)
+    op(f"apple_amx_{kind}{B}_{name}", alu_call(f"{macro}{B}", flags + kind_flags),
+       [dst] + srcs, loops(dims, stmt), strides)
+    op(f"apple_amx_{kind}{B}_{name}_masked", alu_call(f"{macro}{B}", flags + kind_flags + enables),
+       sizes + [dst] + srcs, loops(dims, stmt, guards), bounds + strides)
+  op(f"apple_amx_zero{B}_{name}", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {' | '.join(flags + SKIP_ALL)});",
+     [dst], loops(dims, f"{z} = 0.0"), dst_stride)
 
-def vector_alu_ops(dtype):
-  """Pointwise fma/fms/mul/zero of dtype rows into one dtype row of Z, and the masked variants."""
-  N, B = lanes(dtype), bits(dtype)
-  dst = Param("dst", dtype, (N,), "Z")
-  srcs, src_strides = alu_sources(dtype)
-  for kind, (macro, flags, stmt) in ALU_KINDS.items():
-    flags = ["AMX_VECTOR"] + flags
-    stmt = stmt.format(z="dst[i]", y="srcy[i]", x="srcx[i]")
-    op(f"apple_amx_{kind}{B}_vec", alu_call(f"{macro}{B}", flags),
-       [dst] + srcs, loops([N], stmt),
-       unit_strides(("dst", 0)) + src_strides)
-    op(f"apple_amx_{kind}{B}_vec_masked",
-       alu_call(f"{macro}{B}", flags + ["AMX_ENABLE_X_FIRST({n})"]),
-       [Param("n"), dst] + srcs, loops([N], stmt, ["i < n"]),
-       [f"n <= {N}", "0 < n"] + unit_strides(("dst", 0)) + src_strides)
-  op(f"apple_amx_zero{B}_vec", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {' | '.join(['AMX_VECTOR'] + SKIP_ALL)});",
-     [dst], loops([N], "dst[i] = 0.0"), unit_strides(("dst", 0)))
+# Matrix mode takes the outer product of a Y row and an X row into an NxN tile of Z, vector mode
+# their pointwise product into one row.
+matrix_alu_ops = partial(alu_ops, name="mat", flags=[], z="dst[i, j]", y="srcy[i]", x="srcx[j]",
+                         masks={"rows": "AMX_ENABLE_Y_FIRST", "cols": "AMX_ENABLE_X_FIRST"})
+vector_alu_ops = partial(alu_ops, name="vec", flags=["AMX_VECTOR"], z="dst[i]", y="srcy[i]", x="srcx[i]",
+                         masks={"n": "AMX_ENABLE_X_FIRST"})
 
 for dtype in FP_TYPES:
-  matrix_alu_ops(dtype, dtype)
+  matrix_alu_ops(dtype)
   vector_alu_ops(dtype)
 # fma16 can also accumulate into f32 (AMX_Z_F32), in matrix mode only. The
 # 32x32 f32 tile then spreads over all 64 Z registers as interleaved pairs:
 # logical row j is registers 2j (even lanes) and 2j + 1 (odd lanes).
-matrix_alu_ops("f16", "f32", suffix="_f32", mode_flags=["AMX_Z_F32"])
+matrix_alu_ops("f16", zdtype="f32", suffix="_f32", mode_flags=["AMX_Z_F32"])
 
 # ldzi / stzi move one such 128-byte row in two calls, the register field's
 # low bit selecting the left or right 16 lanes.
 WIDE_LANES = 2 * lanes("f32")
-wide_row = loops([WIDE_LANES], "dst[i] = src[i]")
-op("apple_amx_ldzi_f32",
-   "AMX_LDZI(&{src_data}, ({dst_data}), 0); AMX_LDZI(&{src_data} + 16, ({dst_data}) | 1, 0);",
-   [Param("dst", "f32", (WIDE_LANES,), "Z"), Param("src", "f32", (WIDE_LANES,))],
-   wide_row, unit_strides(("dst", 0), ("src", 0)))
-op("apple_amx_stzi_f32",
-   "AMX_STZI(&{dst_data}, ({src_data}), 0); AMX_STZI(&{dst_data} + 16, ({src_data}) | 1, 0);",
-   [Param("dst", "f32", (WIDE_LANES,)), Param("src", "f32", (WIDE_LANES,), "Z")],
-   wide_row, unit_strides(("dst", 0), ("src", 0)))
+move("apple_amx_ldzi_f32", "AMX_LDZI(&{src_data}, ({dst_data}), 0); AMX_LDZI(&{src_data} + 16, ({dst_data}) | 1, 0);",
+     "f32", (WIDE_LANES,), dst="Z")
+move("apple_amx_stzi_f32", "AMX_STZI(&{dst_data}, ({src_data}), 0); AMX_STZI(&{dst_data} + 16, ({src_data}) | 1, 0);",
+     "f32", (WIDE_LANES,), src="Z")
 
 HEADER = """\
 # AUTOGENERATED by gen_appleamx_ops.py. DO NOT EDIT.
