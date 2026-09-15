@@ -1,4 +1,5 @@
 // Modified: https://github.com/corsix/amx/blob/main/aarch64.h
+// Instruction and operand encodings are documented there.
 
 #pragma once
 #include <stdint.h>
@@ -9,9 +10,11 @@
 #define AMX_OP_GPR(op, gpr) \
   __asm(".word (0x201000 + (%0 << 5) + 0%1 - ((0%1 >> 4) * 6))" : : "i"(op), "r"((uint64_t)(gpr)) : "memory")
 
+// reg is a register index; the pointer need not be aligned for single-register moves
 #define AMX_LDST(op, ptr, reg, flags) \
   AMX_OP_GPR(op, ((uint64_t)&*(ptr)) | ((uint64_t)(reg) << 56) | (flags))
 
+// y and x are byte offsets into the Y and X register files, z is a Z row index
 #define AMX_ALU(op, y, x, z, flags) \
   AMX_OP_GPR(op, ((uint64_t)(y)) | ((uint64_t)(x) << 10) | ((uint64_t)(z) << 20) | (flags))
 
@@ -39,3 +42,24 @@
 #define AMX_MATINT(y, x, z, flags) AMX_ALU(20, y, x, z, flags)
 #define AMX_MATFP(y, x, z, flags)  AMX_ALU(21, y, x, z, flags)
 #define AMX_GENLUT(src, flags)     AMX_OP_GPR(22, ((uint64_t)(src)) | (flags))
+
+// Load / store flags. A pair move needs a 128-byte aligned pointer.
+#define AMX_LDST_PAIR (1ull << 62)
+
+// fma* / fms* / mac16 flags
+#define AMX_VECTOR (1ull << 63)  // pointwise z[i] += x[i]*y[i] instead of the outer product
+#define AMX_SKIP_X (1ull << 29)
+#define AMX_SKIP_Y (1ull << 28)
+#define AMX_SKIP_Z (1ull << 27)
+// Restrict to the first n lanes of X (columns of Z) or Y (rows of Z).
+// The 5-bit field wraps, so a full lane count encodes as 0, which means all lanes.
+#define AMX_ENABLE_X_FIRST(n) ((2ull << 46) | (((uint64_t)(n) & 31) << 41))
+#define AMX_ENABLE_Y_FIRST(n) ((2ull << 37) | (((uint64_t)(n) & 31) << 32))
+
+#define AMX_EXTRX_FROM_Y(xreg, yreg) \
+  AMX_EXTRX((1ull << 27) | ((uint64_t)(yreg) << 20) | ((uint64_t)(xreg) << 16))
+#define AMX_EXTRY_FROM_X(yreg, xreg) \
+  AMX_EXTRY((1ull << 27) | ((uint64_t)(xreg) << 20) | ((uint64_t)(yreg) << 6))
+// lane: 0 = 64-bit, 1 = 32-bit, 2 = 16-bit; only affects the write mask
+#define AMX_EXTRH(xreg, zrow, lane) \
+  AMX_EXTRX(((uint64_t)(lane) << 28) | ((uint64_t)(zrow) << 20) | (((uint64_t)(xreg) * 64) << 10))

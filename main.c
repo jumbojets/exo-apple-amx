@@ -10,9 +10,12 @@
 
 #define K 2048
 
+typedef void kernel(void *ctxt, int_fast32_t, const _Float16*, const _Float16*, _Float16*);
+
 static alignas(64) _Float16 A[K * 8 * 64];
 static alignas(64) _Float16 B[K * 8 * 32];
 static alignas(64) _Float16 C[64 * 32];
+static alignas(64) _Float16 C_ref[64 * 32];
 
 static inline _Float16 rand_float16() {
   return (_Float16)(rand() / ((double)RAND_MAX + 1));
@@ -21,10 +24,25 @@ static inline _Float16 rand_float16() {
 void initialize() {
   for (size_t i = 0; i < K * 8 * 64; i++) A[i] = rand_float16();
   for (size_t i = 0; i < K * 8 * 32; i++) B[i] = rand_float16();
-  memset(C, 0, 64 * 32 * sizeof(_Float16));
+  memset(C, 0, sizeof(C));
 }
 
-double benchmark(void (*f)(void *c, int_fast32_t, const _Float16*, const _Float16*, _Float16*)) {
+// Compare the scheduled kernel against the naive one on small integer inputs.
+int verify(kernel *ref, kernel *test) {
+  const int_fast32_t k = 2;
+  for (size_t i = 0; i < k * 8 * 64; i++) A[i] = (_Float16)(rand() % 7 - 3);
+  for (size_t i = 0; i < k * 8 * 32; i++) B[i] = (_Float16)(rand() % 7 - 3);
+  memset(C_ref, 0, sizeof(C_ref));
+  memset(C, 0, sizeof(C));
+  ref(NULL, k, A, B, C_ref);
+  test(NULL, k, A, B, C);
+  int mismatches = 0;
+  for (size_t i = 0; i < 64 * 32; i++) mismatches += (float)C[i] != (float)C_ref[i];
+  if (mismatches) printf("VERIFY FAILED: %d of %d entries differ\n", mismatches, 64 * 32);
+  return mismatches;
+}
+
+double benchmark(kernel *f) {
   double best_gflops = 0;
   for (size_t i = 0; i < 10; i++) {
     initialize();
@@ -40,6 +58,8 @@ double benchmark(void (*f)(void *c, int_fast32_t, const _Float16*, const _Float1
 
 int main() {
   srand(time(NULL));
+
+  if (verify(rank_kx8_reduce_64x32, rank_kx8_reduce_64x32_scheduled_appleamx)) return 1;
 
   double unscheduled_gflops = benchmark(rank_kx8_reduce_64x32);
   double scheduled_gflops = benchmark(rank_kx8_reduce_64x32_scheduled_appleamx);

@@ -19,6 +19,11 @@ appleamx_matmul.o: amx.h
 
 main.c: appleamx_matmul.c
 
+.PHONY: test
+test: appleamx.install
+	$(PYTHON) gen_appleamx_ops.py --check
+	$(PYTHON) test_appleamx_ops.py
+
 .PHONY: clean
 clean:
 	$(RM) appleamx_matmul appleamx_matmul.[cdh] *.o exo_demo
