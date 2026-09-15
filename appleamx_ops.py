@@ -721,25 +721,6 @@ def apple_amx_fma16_mat_masked(rows: size, cols: size, dst: [f16][32, 32] @ APPL
         if j < cols:
           dst[i, j] += srcy[i] * srcx[j]
 
-@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fma16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 32):
-    dst[i] += srcy[i] * srcx[i]
-
-@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fma16_vec_masked(n: size, dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
-  assert n <= 32
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 32):
-    if i < n:
-      dst[i] += srcy[i] * srcx[i]
-
 @instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), 0);")
 def apple_amx_fms16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
   assert stride(dst, 1) == 1
@@ -763,25 +744,6 @@ def apple_amx_fms16_mat_masked(rows: size, cols: size, dst: [f16][32, 32] @ APPL
       if i < rows:
         if j < cols:
           dst[i, j] += -(srcy[i] * srcx[j])
-
-@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fms16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 32):
-    dst[i] += -(srcy[i] * srcx[i])
-
-@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fms16_vec_masked(n: size, dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
-  assert n <= 32
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 32):
-    if i < n:
-      dst[i] += -(srcy[i] * srcx[i])
 
 @instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_SKIP_Z);")
 def apple_amx_mul16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
@@ -807,6 +769,51 @@ def apple_amx_mul16_mat_masked(rows: size, cols: size, dst: [f16][32, 32] @ APPL
         if j < cols:
           dst[i, j] = srcy[i] * srcx[j]
 
+@instr("AMX_FMA16(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
+def apple_amx_zero16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 1) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      dst[i, j] = 0.0
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fma16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fma16_vec_masked(n: size, dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert n <= 32
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    if i < n:
+      dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fms16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    dst[i] += -(srcy[i] * srcx[i])
+
+@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fms16_vec_masked(n: size, dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert n <= 32
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    if i < n:
+      dst[i] += -(srcy[i] * srcx[i])
+
 @instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_SKIP_Z);")
 def apple_amx_mul16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
   assert stride(dst, 0) == 1
@@ -825,13 +832,6 @@ def apple_amx_mul16_vec_masked(n: size, dst: [f16][32] @ APPLE_AMX_POOL_Z, srcy:
   for i in seq(0, 32):
     if i < n:
       dst[i] = srcy[i] * srcx[i]
-
-@instr("AMX_FMA16(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
-def apple_amx_zero16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z):
-  assert stride(dst, 1) == 1
-  for i in seq(0, 32):
-    for j in seq(0, 32):
-      dst[i, j] = 0.0
 
 @instr("AMX_FMA16(0, 0, ({dst_data}), AMX_VECTOR | AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
 def apple_amx_zero16_vec(dst: [f16][32] @ APPLE_AMX_POOL_Z):
@@ -863,25 +863,6 @@ def apple_amx_fma32_mat_masked(rows: size, cols: size, dst: [f32][16, 16] @ APPL
         if j < cols:
           dst[i, j] += srcy[i] * srcx[j]
 
-@instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fma32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 16):
-    dst[i] += srcy[i] * srcx[i]
-
-@instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fma32_vec_masked(n: size, dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
-  assert n <= 16
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 16):
-    if i < n:
-      dst[i] += srcy[i] * srcx[i]
-
 @instr("AMX_FMS32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), 0);")
 def apple_amx_fms32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
   assert stride(dst, 1) == 1
@@ -905,25 +886,6 @@ def apple_amx_fms32_mat_masked(rows: size, cols: size, dst: [f32][16, 16] @ APPL
       if i < rows:
         if j < cols:
           dst[i, j] += -(srcy[i] * srcx[j])
-
-@instr("AMX_FMS32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fms32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 16):
-    dst[i] += -(srcy[i] * srcx[i])
-
-@instr("AMX_FMS32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fms32_vec_masked(n: size, dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
-  assert n <= 16
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 16):
-    if i < n:
-      dst[i] += -(srcy[i] * srcx[i])
 
 @instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_SKIP_Z);")
 def apple_amx_mul32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
@@ -949,6 +911,51 @@ def apple_amx_mul32_mat_masked(rows: size, cols: size, dst: [f32][16, 16] @ APPL
         if j < cols:
           dst[i, j] = srcy[i] * srcx[j]
 
+@instr("AMX_FMA32(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
+def apple_amx_zero32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 1) == 1
+  for i in seq(0, 16):
+    for j in seq(0, 16):
+      dst[i, j] = 0.0
+
+@instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fma32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 16):
+    dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fma32_vec_masked(n: size, dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
+  assert n <= 16
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 16):
+    if i < n:
+      dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMS32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fms32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 16):
+    dst[i] += -(srcy[i] * srcx[i])
+
+@instr("AMX_FMS32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fms32_vec_masked(n: size, dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
+  assert n <= 16
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 16):
+    if i < n:
+      dst[i] += -(srcy[i] * srcx[i])
+
 @instr("AMX_FMA32(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_SKIP_Z);")
 def apple_amx_mul32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy: [f32][16] @ APPLE_AMX_POOL_Y, srcx: [f32][16] @ APPLE_AMX_POOL_X):
   assert stride(dst, 0) == 1
@@ -967,13 +974,6 @@ def apple_amx_mul32_vec_masked(n: size, dst: [f32][16] @ APPLE_AMX_POOL_Z, srcy:
   for i in seq(0, 16):
     if i < n:
       dst[i] = srcy[i] * srcx[i]
-
-@instr("AMX_FMA32(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
-def apple_amx_zero32_mat(dst: [f32][16, 16] @ APPLE_AMX_POOL_Z):
-  assert stride(dst, 1) == 1
-  for i in seq(0, 16):
-    for j in seq(0, 16):
-      dst[i, j] = 0.0
 
 @instr("AMX_FMA32(0, 0, ({dst_data}), AMX_VECTOR | AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
 def apple_amx_zero32_vec(dst: [f32][16] @ APPLE_AMX_POOL_Z):
@@ -1005,25 +1005,6 @@ def apple_amx_fma64_mat_masked(rows: size, cols: size, dst: [f64][8, 8] @ APPLE_
         if j < cols:
           dst[i, j] += srcy[i] * srcx[j]
 
-@instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fma64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 8):
-    dst[i] += srcy[i] * srcx[i]
-
-@instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fma64_vec_masked(n: size, dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
-  assert n <= 8
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 8):
-    if i < n:
-      dst[i] += srcy[i] * srcx[i]
-
 @instr("AMX_FMS64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), 0);")
 def apple_amx_fms64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
   assert stride(dst, 1) == 1
@@ -1047,25 +1028,6 @@ def apple_amx_fms64_mat_masked(rows: size, cols: size, dst: [f64][8, 8] @ APPLE_
       if i < rows:
         if j < cols:
           dst[i, j] += -(srcy[i] * srcx[j])
-
-@instr("AMX_FMS64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
-def apple_amx_fms64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 8):
-    dst[i] += -(srcy[i] * srcx[i])
-
-@instr("AMX_FMS64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
-def apple_amx_fms64_vec_masked(n: size, dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
-  assert n <= 8
-  assert 0 < n
-  assert stride(dst, 0) == 1
-  assert stride(srcy, 0) == 1
-  assert stride(srcx, 0) == 1
-  for i in seq(0, 8):
-    if i < n:
-      dst[i] += -(srcy[i] * srcx[i])
 
 @instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_SKIP_Z);")
 def apple_amx_mul64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
@@ -1091,6 +1053,51 @@ def apple_amx_mul64_mat_masked(rows: size, cols: size, dst: [f64][8, 8] @ APPLE_
         if j < cols:
           dst[i, j] = srcy[i] * srcx[j]
 
+@instr("AMX_FMA64(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
+def apple_amx_zero64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 1) == 1
+  for i in seq(0, 8):
+    for j in seq(0, 8):
+      dst[i, j] = 0.0
+
+@instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fma64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 8):
+    dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fma64_vec_masked(n: size, dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
+  assert n <= 8
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 8):
+    if i < n:
+      dst[i] += srcy[i] * srcx[i]
+
+@instr("AMX_FMS64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR);")
+def apple_amx_fms64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 8):
+    dst[i] += -(srcy[i] * srcx[i])
+
+@instr("AMX_FMS64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_ENABLE_X_FIRST({n}));")
+def apple_amx_fms64_vec_masked(n: size, dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
+  assert n <= 8
+  assert 0 < n
+  assert stride(dst, 0) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 8):
+    if i < n:
+      dst[i] += -(srcy[i] * srcx[i])
+
 @instr("AMX_FMA64(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_VECTOR | AMX_SKIP_Z);")
 def apple_amx_mul64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: [f64][8] @ APPLE_AMX_POOL_Y, srcx: [f64][8] @ APPLE_AMX_POOL_X):
   assert stride(dst, 0) == 1
@@ -1110,15 +1117,101 @@ def apple_amx_mul64_vec_masked(n: size, dst: [f64][8] @ APPLE_AMX_POOL_Z, srcy: 
     if i < n:
       dst[i] = srcy[i] * srcx[i]
 
-@instr("AMX_FMA64(0, 0, ({dst_data}), AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
-def apple_amx_zero64_mat(dst: [f64][8, 8] @ APPLE_AMX_POOL_Z):
-  assert stride(dst, 1) == 1
-  for i in seq(0, 8):
-    for j in seq(0, 8):
-      dst[i, j] = 0.0
-
 @instr("AMX_FMA64(0, 0, ({dst_data}), AMX_VECTOR | AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
 def apple_amx_zero64_vec(dst: [f64][8] @ APPLE_AMX_POOL_Z):
   assert stride(dst, 0) == 1
   for i in seq(0, 8):
     dst[i] = 0.0
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32);")
+def apple_amx_fma16_mat_f32(dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      dst[i, j] += srcy[i] * srcx[j]
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32 | AMX_ENABLE_Y_FIRST({rows}) | AMX_ENABLE_X_FIRST({cols}));")
+def apple_amx_fma16_mat_f32_masked(rows: size, cols: size, dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert rows <= 32
+  assert 0 < rows
+  assert cols <= 32
+  assert 0 < cols
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      if i < rows:
+        if j < cols:
+          dst[i, j] += srcy[i] * srcx[j]
+
+@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32);")
+def apple_amx_fms16_mat_f32(dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      dst[i, j] += -(srcy[i] * srcx[j])
+
+@instr("AMX_FMS16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32 | AMX_ENABLE_Y_FIRST({rows}) | AMX_ENABLE_X_FIRST({cols}));")
+def apple_amx_fms16_mat_f32_masked(rows: size, cols: size, dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert rows <= 32
+  assert 0 < rows
+  assert cols <= 32
+  assert 0 < cols
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      if i < rows:
+        if j < cols:
+          dst[i, j] += -(srcy[i] * srcx[j])
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32 | AMX_SKIP_Z);")
+def apple_amx_mul16_mat_f32(dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      dst[i, j] = srcy[i] * srcx[j]
+
+@instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), AMX_Z_F32 | AMX_SKIP_Z | AMX_ENABLE_Y_FIRST({rows}) | AMX_ENABLE_X_FIRST({cols}));")
+def apple_amx_mul16_mat_f32_masked(rows: size, cols: size, dst: [f32][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):
+  assert rows <= 32
+  assert 0 < rows
+  assert cols <= 32
+  assert 0 < cols
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      if i < rows:
+        if j < cols:
+          dst[i, j] = srcy[i] * srcx[j]
+
+@instr("AMX_FMA16(0, 0, ({dst_data}), AMX_Z_F32 | AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z);")
+def apple_amx_zero16_mat_f32(dst: [f32][32, 32] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 1) == 1
+  for i in seq(0, 32):
+    for j in seq(0, 32):
+      dst[i, j] = 0.0
+
+@instr("AMX_LDZI(&{src_data}, ({dst_data}), 0); AMX_LDZI(&{src_data} + 16, ({dst_data}) | 1, 0);")
+def apple_amx_ldzi_f32(dst: [f32][32] @ APPLE_AMX_POOL_Z, src: [f32][32] @ DRAM):
+  assert stride(dst, 0) == 1
+  assert stride(src, 0) == 1
+  for i in seq(0, 32):
+    dst[i] = src[i]
+
+@instr("AMX_STZI(&{dst_data}, ({src_data}), 0); AMX_STZI(&{dst_data} + 16, ({src_data}) | 1, 0);")
+def apple_amx_stzi_f32(dst: [f32][32] @ DRAM, src: [f32][32] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 0) == 1
+  assert stride(src, 0) == 1
+  for i in seq(0, 32):
+    dst[i] = src[i]

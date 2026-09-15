@@ -45,6 +45,13 @@
 
 // Load / store flags. A pair move needs a 128-byte aligned pointer.
 #define AMX_LDST_PAIR (1ull << 62)
+// ldzi / stzi move 64 bytes between memory and one half of a Z register pair:
+// even 32-bit lanes go to the even register, odd lanes to the odd one. The
+// register field is (pair << 1) | half, i.e. the even row index plus the half.
+
+// fma16 / fms16 matrix mode: accumulate into f32. Z is then one 32x32 f32 grid
+// over all 64 rows, logical row j in registers (2j, 2j+1) as ldzi/stzi lay it out.
+#define AMX_Z_F32 (1ull << 62)
 
 // fma* / fms* / mac16 flags
 #define AMX_VECTOR (1ull << 63)  // pointwise z[i] += x[i]*y[i] instead of the outer product

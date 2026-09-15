@@ -11,6 +11,9 @@ Generated per element type (those Exo supports: f16 f32 f64 i8 ui8 ui16 i32):
 and per floating-point type:
   fma / fms / mul / zero     outer product (`_mat`) and pointwise (`_vec`)
   *_masked                   the same restricted to the first `rows` / `cols` lanes
+plus the one mixed-precision mode Exo can express, f16 inputs accumulated in f32:
+  {fma,fms,mul,zero}16_mat_f32   outer product into a 32x32 f32 tile spanning all 64 Z rows
+  ldzi / stzi                one 128-byte f32 row of that tile, as two half moves
 """
 import sys
 from collections import namedtuple
@@ -100,41 +103,72 @@ ALU_KINDS = {
   "fms": ("AMX_FMS", [], "{z} += -({y} * {x})"),  # Exo only has `+=` reductions
   "mul": ("AMX_FMA", ["AMX_SKIP_Z"], "{z} = {y} * {x}"),
 }
+SKIP_ALL = ["AMX_SKIP_X", "AMX_SKIP_Y", "AMX_SKIP_Z"]  # fma with every input skipped writes 0 to Z
 
 def alu_call(macro, flags):
   return f"{macro}(({{srcy_data}}) * 64, ({{srcx_data}}) * 64, ({{dst_data}}), {' | '.join(flags) or 0});"
 
-for dtype in FP_TYPES:
+def alu_sources(dtype):
+  N = lanes(dtype)
+  return [Param("srcy", dtype, (N,), "Y"), Param("srcx", dtype, (N,), "X")], unit_strides(("srcy", 0), ("srcx", 0))
+
+def matrix_alu_ops(dtype, zdtype, suffix="", mode_flags=()):
+  """Outer products of dtype rows into an NxN zdtype accumulator: fma/fms/mul/zero and the masked variants."""
   N, B = lanes(dtype), bits(dtype)
-  zmat = Param("dst", dtype, (N, N), "Z")
-  zvec = Param("dst", dtype, (N,), "Z")
-  srcs = [Param("srcy", dtype, (N,), "Y"), Param("srcx", dtype, (N,), "X")]
-  src_strides = unit_strides(("srcy", 0), ("srcx", 0))
+  dst = Param("dst", zdtype, (N, N), "Z")
+  srcs, src_strides = alu_sources(dtype)
   for kind, (macro, flags, stmt) in ALU_KINDS.items():
-    macro = f"{macro}{B}"
-    mat_stmt = stmt.format(z="dst[i, j]", y="srcy[i]", x="srcx[j]")
-    vec_stmt = stmt.format(z="dst[i]", y="srcy[i]", x="srcx[i]")
-    op(f"apple_amx_{kind}{B}_mat", alu_call(macro, flags),
-       [zmat] + srcs, loops([N, N], mat_stmt),
+    flags = list(mode_flags) + flags
+    stmt = stmt.format(z="dst[i, j]", y="srcy[i]", x="srcx[j]")
+    op(f"apple_amx_{kind}{B}_mat{suffix}", alu_call(f"{macro}{B}", flags),
+       [dst] + srcs, loops([N, N], stmt),
        unit_strides(("dst", 1)) + src_strides)
-    op(f"apple_amx_{kind}{B}_mat_masked",
-       alu_call(macro, flags + ["AMX_ENABLE_Y_FIRST({rows})", "AMX_ENABLE_X_FIRST({cols})"]),
-       [Param("rows"), Param("cols"), zmat] + srcs,
-       loops([N, N], mat_stmt, ["i < rows", "j < cols"]),
+    op(f"apple_amx_{kind}{B}_mat{suffix}_masked",
+       alu_call(f"{macro}{B}", flags + ["AMX_ENABLE_Y_FIRST({rows})", "AMX_ENABLE_X_FIRST({cols})"]),
+       [Param("rows"), Param("cols"), dst] + srcs,
+       loops([N, N], stmt, ["i < rows", "j < cols"]),
        [f"rows <= {N}", "0 < rows", f"cols <= {N}", "0 < cols"] + unit_strides(("dst", 1)) + src_strides)
-    op(f"apple_amx_{kind}{B}_vec", alu_call(macro, ["AMX_VECTOR"] + flags),
-       [zvec] + srcs, loops([N], vec_stmt),
+  op(f"apple_amx_zero{B}_mat{suffix}", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {' | '.join(list(mode_flags) + SKIP_ALL)});",
+     [dst], loops([N, N], "dst[i, j] = 0.0"), unit_strides(("dst", 1)))
+
+def vector_alu_ops(dtype):
+  """Pointwise fma/fms/mul/zero of dtype rows into one dtype row of Z, and the masked variants."""
+  N, B = lanes(dtype), bits(dtype)
+  dst = Param("dst", dtype, (N,), "Z")
+  srcs, src_strides = alu_sources(dtype)
+  for kind, (macro, flags, stmt) in ALU_KINDS.items():
+    flags = ["AMX_VECTOR"] + flags
+    stmt = stmt.format(z="dst[i]", y="srcy[i]", x="srcx[i]")
+    op(f"apple_amx_{kind}{B}_vec", alu_call(f"{macro}{B}", flags),
+       [dst] + srcs, loops([N], stmt),
        unit_strides(("dst", 0)) + src_strides)
     op(f"apple_amx_{kind}{B}_vec_masked",
-       alu_call(macro, ["AMX_VECTOR"] + flags + ["AMX_ENABLE_X_FIRST({n})"]),
-       [Param("n"), zvec] + srcs, loops([N], vec_stmt, ["i < n"]),
+       alu_call(f"{macro}{B}", flags + ["AMX_ENABLE_X_FIRST({n})"]),
+       [Param("n"), dst] + srcs, loops([N], stmt, ["i < n"]),
        [f"n <= {N}", "0 < n"] + unit_strides(("dst", 0)) + src_strides)
-  # fma with every input skipped writes 0 to Z
-  skip_all = "AMX_SKIP_X | AMX_SKIP_Y | AMX_SKIP_Z"
-  op(f"apple_amx_zero{B}_mat", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {skip_all});",
-     [zmat], loops([N, N], "dst[i, j] = 0.0"), unit_strides(("dst", 1)))
-  op(f"apple_amx_zero{B}_vec", f"AMX_FMA{B}(0, 0, ({{dst_data}}), AMX_VECTOR | {skip_all});",
-     [zvec], loops([N], "dst[i] = 0.0"), unit_strides(("dst", 0)))
+  op(f"apple_amx_zero{B}_vec", f"AMX_FMA{B}(0, 0, ({{dst_data}}), {' | '.join(['AMX_VECTOR'] + SKIP_ALL)});",
+     [dst], loops([N], "dst[i] = 0.0"), unit_strides(("dst", 0)))
+
+for dtype in FP_TYPES:
+  matrix_alu_ops(dtype, dtype)
+  vector_alu_ops(dtype)
+# fma16 can also accumulate into f32 (AMX_Z_F32), in matrix mode only. The
+# 32x32 f32 tile then spreads over all 64 Z registers as interleaved pairs:
+# logical row j is registers 2j (even lanes) and 2j + 1 (odd lanes).
+matrix_alu_ops("f16", "f32", suffix="_f32", mode_flags=["AMX_Z_F32"])
+
+# ldzi / stzi move one such 128-byte row in two calls, the register field's
+# low bit selecting the left or right 16 lanes.
+WIDE_LANES = 2 * lanes("f32")
+wide_row = loops([WIDE_LANES], "dst[i] = src[i]")
+op("apple_amx_ldzi_f32",
+   "AMX_LDZI(&{src_data}, ({dst_data}), 0); AMX_LDZI(&{src_data} + 16, ({dst_data}) | 1, 0);",
+   [Param("dst", "f32", (WIDE_LANES,), "Z"), Param("src", "f32", (WIDE_LANES,))],
+   wide_row, unit_strides(("dst", 0), ("src", 0)))
+op("apple_amx_stzi_f32",
+   "AMX_STZI(&{dst_data}, ({src_data}), 0); AMX_STZI(&{dst_data} + 16, ({src_data}) | 1, 0);",
+   [Param("dst", "f32", (WIDE_LANES,)), Param("src", "f32", (WIDE_LANES,), "Z")],
+   wide_row, unit_strides(("dst", 0), ("src", 0)))
 
 HEADER = """\
 # AUTOGENERATED by gen_appleamx_ops.py. DO NOT EDIT.

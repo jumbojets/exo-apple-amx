@@ -28,12 +28,10 @@ class _AMXState:
 _amx = _AMXState()
 
 class _APPLE_AMX_POOL(StaticMemory):
-  """Base class for the three AMX register files.
-
-  Every register is a 64-byte row. A 1D Exo buffer occupies one row and a 2D
-  buffer occupies one row per matrix row; the second dimension must fill the
-  row exactly. Buffers compile to a `#define name <first row>` and instruction
-  operands are computed from that base row (see `window`).
+  """Base class for the three AMX register files: NUM_ROWS registers of 64
+  bytes each. An Exo buffer is a vector (one row) or a matrix (one row per
+  matrix row); which physical rows it occupies and how far apart the rows of
+  a matrix are is up to the pool (`rows_for`, `row_stride`).
   """
 
   CTYPE_BYTES = {
@@ -51,39 +49,32 @@ class _APPLE_AMX_POOL(StaticMemory):
       _amx.pools.append(cls)
 
   @classmethod
-  def global_(cls):
-    return _amx.header()
-
+  def global_(cls): return _amx.header()
   @classmethod
-  def can_read(cls):
-    return False
+  def can_read(cls): return False
 
   @classmethod
   def alloc(cls, new_name, prim_type, shape, srcinfo):
     prefix = _amx.set_if_inactive()
     dims = [int(d) for d in shape]
-    if not dims or dims[-1] * cls.CTYPE_BYTES[prim_type] != cls.ROW_BYTES:
-      raise MemGenError(
-        f"{srcinfo}: {cls.__name__} rows must be exactly {cls.ROW_BYTES} bytes, "
-        f"got {prim_type}[{', '.join(shape)}]")
-    match dims:
-      case [_]:
-        rows = [cls.find_free_chunk()]
-      case [n_rows, n_cols]:
-        rows = cls.matrix_rows(n_rows, n_cols, srcinfo)
-        if rows is None:
-          raise MemGenError(f"{srcinfo}: not enough free rows in {cls.__name__} for {n_rows}x{n_cols}")
-      case _:
-        raise MemGenError(f"{srcinfo}: {cls.__name__} can only hold a vector or a matrix")
-    for row in rows:
-      cls.mark(row)
+    if len(dims) not in (1, 2):
+      raise MemGenError(f"{srcinfo}: {cls.__name__} can only hold a vector or a matrix")
+    rows = cls.rows_for(prim_type, dims, srcinfo)
+    for row in rows: cls.mark(row)
     cls.row_dict[new_name] = rows
     return f"{prefix}#define {new_name} {rows[0]}"
 
   @classmethod
+  def find_free_run(cls, n, step=1):
+    """The first run of n consecutive free rows starting at a multiple of step, or None."""
+    for first in range(0, cls.NUM_ROWS - n + 1, step):
+      if not any(cls.is_chunk_allocated[first:first + n]):
+        return list(range(first, first + n))
+    return None
+
+  @classmethod
   def free(cls, new_name, prim_type, shape, srcinfo):
-    for row in cls.row_dict.pop(new_name):
-      cls.unmark(row)
+    for row in cls.row_dict.pop(new_name): cls.unmark(row)
     return f"#undef {new_name}{_amx.clr_if_all_free()}"
 
   @classmethod
@@ -95,8 +86,25 @@ class _APPLE_AMX_POOL(StaticMemory):
       raise MemGenError(f"{srcinfo}: AMX instruction operands must be whole rows (lane 0, unit stride)")
     match indices:
       case [_]: return baseptr
-      case [row, _]: return f"{baseptr} + ({row}) * {cls.row_stride(shape)}"
+      case [row, _]: return f"{baseptr} + ({row}) * {cls.row_stride(basetyp)}"
       case _: raise MemGenError(f"{srcinfo}: {cls.__name__} can only hold a vector or a matrix")
+
+  @classmethod
+  def rows_for(cls, prim_type, dims, srcinfo):
+    """Physical rows for a vector or matrix of prim_type whose rows each fill one register."""
+    if dims[-1] * cls.CTYPE_BYTES[prim_type] != cls.ROW_BYTES:
+      raise MemGenError(
+        f"{srcinfo}: {cls.__name__} rows must be exactly {cls.ROW_BYTES} bytes, "
+        f"got {prim_type}[{', '.join(map(str, dims))}]")
+    match dims:
+      case [_]: return [cls.find_free_chunk()]
+      case [n_rows, n_cols]:
+        rows = cls.matrix_rows(n_rows, n_cols, srcinfo)
+        if rows is None:
+          raise MemGenError(
+            f"{srcinfo}: not enough free rows in {cls.__name__} for {n_rows}x{n_cols} "
+            f"(live buffers: {', '.join(cls.row_dict) or 'none'})")
+        return rows
 
   @classmethod
   def matrix_rows(cls, n_rows, n_cols, srcinfo):
@@ -104,25 +112,17 @@ class _APPLE_AMX_POOL(StaticMemory):
     ...
 
   @classmethod
-  def row_stride(cls, shape):
-    """Physical rows between consecutive matrix rows of a buffer of this shape."""
+  def row_stride(cls, basetyp):
+    """Physical rows between consecutive matrix rows of a buffer of this type."""
     ...
 
 class _APPLE_AMX_INPUT(_APPLE_AMX_POOL):
   """X and Y: 8 rows each, matrices occupy consecutive rows."""
 
   @classmethod
-  def matrix_rows(cls, n_rows, n_cols, srcinfo):
-    for first in range(0, cls.NUM_ROWS - n_rows + 1):
-      rows = list(range(first, first + n_rows))
-      if all(not cls.is_chunk_allocated[row] for row in rows):
-        return rows
-    return None
-
+  def matrix_rows(cls, n_rows, n_cols, srcinfo): return cls.find_free_run(n_rows)
   @classmethod
-  def row_stride(cls, shape):
-    # matrix rows are consecutive registers, unlike the interleaved Z accumulators
-    return 1
+  def row_stride(cls, basetyp): return 1
 
 class APPLE_AMX_POOL_X(_APPLE_AMX_INPUT): NUM_ROWS = 8
 class APPLE_AMX_POOL_Y(_APPLE_AMX_INPUT): NUM_ROWS = 8
@@ -130,8 +130,31 @@ class APPLE_AMX_POOL_Y(_APPLE_AMX_INPUT): NUM_ROWS = 8
 class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
   """Z: 64 rows. An NxN accumulator with N lanes per row is spread over the
   file with a stride of 64 // N rows, which is the layout the matrix-mode
-  fma/fms instructions produce; up to 64 // N such accumulators coexist."""
+  fma/fms instructions produce; up to 64 // N such accumulators coexist.
+
+  `fma16` can also accumulate into f32. Its 32x32 f32 tile has 128-byte rows,
+  each the register pair (2j, 2j + 1) with the even lanes in the even
+  register, which is the layout `ldzi` / `stzi` move. Wide rows occupy
+  consecutive pairs, so the tile takes the whole file and cannot coexist
+  with any other Z buffer."""
   NUM_ROWS = 64
+
+  @classmethod
+  def is_wide(cls, prim_type, n_cols):
+    """Whether a row of n_cols elements is a register pair rather than one register."""
+    return n_cols * cls.CTYPE_BYTES[prim_type] == 2 * cls.ROW_BYTES
+
+  @classmethod
+  def rows_for(cls, prim_type, dims, srcinfo):
+    if not cls.is_wide(prim_type, dims[-1]):
+      return super().rows_for(prim_type, dims, srcinfo)
+    n_rows = dims[0] if len(dims) == 2 else 1
+    rows = cls.find_free_run(2 * n_rows, step=2)
+    if rows is None:
+      raise MemGenError(
+        f"{srcinfo}: not enough free rows in {cls.__name__} for {n_rows} 128-byte rows "
+        f"(live buffers: {', '.join(cls.row_dict) or 'none'})")
+    return rows
 
   @classmethod
   def matrix_rows(cls, n_rows, n_cols, srcinfo):
@@ -146,5 +169,7 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
     return None
 
   @classmethod
-  def row_stride(cls, shape):
+  def row_stride(cls, basetyp):
+    shape = basetyp.shape()
+    if cls.is_wide(basetyp.basetype().ctype(), shape[-1].val): return 2
     return cls.NUM_ROWS // shape[0].val

@@ -18,7 +18,7 @@ CTYPES = {"f16": "_Float16", "f32": "float", "f64": "double",
 def cases(o):
   sizes = [p.name for p in o.params if p.dtype is None]
   if not sizes: return [("", {})]
-  N = gen.lanes(o.params[len(sizes)].dtype)
+  N = o.params[len(sizes)].shape[0]  # dst lanes, which for f32 accumulation exceed lanes(dtype)
   partial = {"rows": N - 1, "cols": N // 2 + 1, "n": N - 1}
   return [("_partial", {s: partial[s] for s in sizes}), ("_full", {s: N for s in sizes})]
 
@@ -45,6 +45,11 @@ def move(instr, dst, src, shape):
   if len(shape) == 1: return [f"  {instr}({dst}, {src})"]
   return [f"  for r in seq(0, {shape[0]}):", f"    {instr}({dst}[r, 0:{shape[1]}], {src}[r, 0:{shape[1]}])"]
 
+def staging_ops(p):
+  """(load, store) instructions moving one row of register operand p; wide Z rows use ldzi/stzi."""
+  name = p.mem.lower() + ("i" if p.shape[-1] > gen.lanes(p.dtype) else "")
+  return f"apple_amx_ld{name}_{p.dtype}", f"apple_amx_st{name}_{p.dtype}"
+
 def test_proc_source(o, label, sizes):
   """A proc that stages every register operand from DRAM, runs the op, and stores it back."""
   params, asserts, before, after, args = [], [], [], [], []
@@ -60,8 +65,9 @@ def test_proc_source(o, label, sizes):
       continue
     reg = f"{p.name}_reg"
     before.append(f"  {reg}: {p.dtype}[{', '.join(map(str, p.shape))}] @ {gen.MEMS[p.mem]}")
-    before += move(f"apple_amx_ld{p.mem.lower()}_{p.dtype}", reg, p.name, p.shape)
-    after += move(f"apple_amx_st{p.mem.lower()}_{p.dtype}", p.name, reg, p.shape)
+    ld, st = staging_ops(p)
+    before += move(ld, reg, p.name, p.shape)
+    after += move(st, p.name, reg, p.shape)
     args.append(reg)
   body = asserts + before + [f"  {o.name}({', '.join(args)})"] + after
   return f"@proc\ndef t_{o.name}{label}({', '.join(params)}):\n" + "\n".join(body) + "\n"
