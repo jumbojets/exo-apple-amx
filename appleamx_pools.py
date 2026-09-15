@@ -36,7 +36,7 @@ class _APPLE_AMX_POOL(StaticMemory):
   @classmethod
   def alloc(cls, new_name, prim_type, shape, srcinfo):
     set_if_inactive = cls.set_if_inactive()
-    ctype_size = {"_Float16": 2, "float": 4, "double": 4, "int16_t": 2, "int32_t": 4, "int_fast32_t": 4}
+    ctype_size = {"_Float16": 2, "float": 4, "double": 8, "int8_t": 1, "uint8_t": 1, "int16_t": 2, "uint16_t": 2, "int32_t": 4, "int_fast32_t": 4}
     match shape:
       case [*_, n] if int(n) * ctype_size[prim_type] != 64:
         # TODO: i32 can actually be accumulated into i32[32][32] using mac16
@@ -95,7 +95,7 @@ class _APPLE_AMX_INPUT(_APPLE_AMX_POOL):
     assert strides[1] == "1"
     shape = basetyp.shape()
     assert len(shape) == 2
-    return f"{baseptr} + {indices[0]}"
+    return f"({baseptr} + {indices[0]})"
 
 class APPLE_AMX_POOL_X(_APPLE_AMX_INPUT): pass
 class APPLE_AMX_POOL_Y(_APPLE_AMX_INPUT): pass
@@ -132,4 +132,4 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
     shape = basetyp.shape()
     assert len(shape) == 2
     n_accumulators = 64 // shape[0].val # NOTE: This is the physical stride 
-    return f"{baseptr} + {indices[0]} * {n_accumulators}"
+    return f"({baseptr} + ({indices[0]}) * {n_accumulators})"
