@@ -1,3 +1,24 @@
+"""C[64, 32] += A[K * 8, 64]^T @ B[K * 8, 32] in f16 on the Apple AMX coprocessor.
+
+Register plan
+-------------
+In matrix mode `fma16` multiplies one X row (32 f16, the columns of Z) with one
+Y row (32 f16, the rows of Z) into a 32x32 Z tile, so every k is a rank-1 update
+of C.  C has 64 rows, which is two Z tiles fed by the two halves of an A row:
+
+    C_0 (C rows  0-31) += A[k,  0:32] (x) B[k, 0:32]      Y[0:4] (x) X[0:4]
+    C_1 (C rows 32-63) += A[k, 32:64] (x) B[k, 0:32]      Y[4:8] (x) X[0:4]
+
+A 32x32 f16 tile occupies 32 of the 64 Z rows at stride 2, so exactly two fit,
+and alternating fma16 between them is what reaches the throughput ceiling
+(corsix/amx fma.md: 1453 GFLOPS with one accumulator, 2959 with two).  X and Y
+hold 8 rows each, so a block of 4 k values fills X[0:4] with B rows and
+Y[0:4] / Y[4:8] with the two halves of the A rows.
+
+Loads need no special ordering: at 3 loads per 2 fma16 the coprocessor sustains
+the same throughput as with no loads at all (measured on an M1 Max), so a block
+simply loads its 12 rows and then issues its 8 fma16.
+"""
 from __future__ import annotations
 
 import os
@@ -26,87 +47,37 @@ print("=============Original Matmul==============")
 print(rank_kx8_reduce_64x32)
 
 amx = rename(rank_kx8_reduce_64x32, "rank_kx8_reduce_64x32_scheduled_appleamx")
+
+# 1. k outermost: each k is a rank-1 update of all of C.
 amx = reorder_loops(amx, "j k")
 amx = reorder_loops(amx, "i k")
 
-amx = stage_mem(amx, "for k in _:_", "C[0:64, 0:32]", "C_reg")
-amx = divide_dim(amx, "C_reg", 0, 32)
+# 2. C is two 32x32 tiles, each one Z accumulator.  Unrolling the tile loop makes
+#    the two halves of C (and of each A row) distinct expressions, so each half
+#    can be staged on its own.
+amx = divide_loop(amx, "i", 32, ["tile", "i"], perfect=True)
+amx = unroll_loop(amx, "tile")
+amx = simplify(amx)
+amx = stage_mem(amx, "for k in _:_", "C[0:32, 0:32]", "C_0")
+amx = stage_mem(amx, "for k in _:_", "C[32:64, 0:32]", "C_1")
 
-# TODO: must we enumerate? ...this is a little gross
-for i, c in enumerate(amx.find_all("for i0 in _:_")):
-  i2, i3 = f"i2_{i}", f"i3_{i}"
-  amx = divide_loop(amx, c, 32, [i2, i3], perfect=True)
-  amx = simplify(amx)
-  amx = unroll_loop(amx, f"for {i2} in _:_")
-  loop = amx.find_loop(i3)
-  amx = fuse(amx, loop, loop.next())
+# 3. Blocks of 4 k: the B rows go to X, the two halves of the A rows to Y.
+amx = divide_loop(amx, "k", 4, ["k0", "k1"], perfect=True)
+amx = stage_mem(amx, "for k1 in _:_", "B[4 * k0:4 * k0 + 4, 0:32]", "B_x")
+amx = stage_mem(amx, "for k1 in _:_", "A[4 * k0:4 * k0 + 4, 0:32]", "A_lo")
+amx = stage_mem(amx, "for k1 in _:_", "A[4 * k0:4 * k0 + 4, 32:64]", "A_hi")
 amx = simplify(amx)
 
-amx = divide_loop(amx, "for i in _:_", 32, ["j0", "j1"], perfect=True)
-amx = divide_loop(amx, "for k in _:_", 8, ["k0", "k1"], perfect=True)
-amx = auto_stage_mem(amx, amx.find_loop("k1"), "B", "B_reg")
-amx = divide_loop(amx, "for k1 in _:_", 4, ["k1", "k2"], perfect=True)
-amx = reorder_loops(amx, "k2 j0")
-amx = auto_stage_mem(amx, amx.find_loop("k2").expand(1, 0), "A", "A_reg")
-amx = simplify(amx)
+# 4. Register files and instructions.
+for name, pool in [("C_0", APPLE_AMX_POOL_Z), ("C_1", APPLE_AMX_POOL_Z), ("B_x", APPLE_AMX_POOL_X),
+                   ("A_lo", APPLE_AMX_POOL_Y), ("A_hi", APPLE_AMX_POOL_Y)]:
+  amx = set_memory(amx, name, pool)
+for op in [apple_amx_ldz_f16, apple_amx_stz_f16, apple_amx_ldx_f16, apple_amx_ldy_f16, apple_amx_fma16_mat]:
+  amx = replace_all(amx, op)
 
-# NOTE: for some reason find_alloc_or_arg doesn't work with a_reg_1
-# Chain many "nexts" together to find it
-def next(c, n=1):
-  for _ in range(n): c = c.next()
-  return c
-
-amx = unroll_loop(amx, "for j0 in _:_")
-areg = amx.find_alloc_or_arg("A_reg") # NOTE: see above
-amx = reorder_stmt_forward(amx, next(areg, n=2))
-amx = reorder_stmt_forward(amx, next(areg))
-amx = simplify(amx)
-
-amx = unroll_loop(amx, "for k1 in _:_")
-areg1 = next(amx.find_alloc_or_arg("A_reg"))
-amx = reuse_buffer(amx, areg1, next(areg1, n=6)) # NOTE: see above
-areg = amx.find_alloc_or_arg("A_reg")
-amx = reuse_buffer(amx, areg, next(areg, n=6))
-
-# TODO: instead of unrolling C_reg, we should implement a 3rd dim for APPLE_AMX_POOL_Z
-amx = unroll_buffer(amx, "C_reg", 0)
-amx = set_memory(amx, "C_reg_0", APPLE_AMX_POOL_Z)
-amx = set_memory(amx, "C_reg_1", APPLE_AMX_POOL_Z)
-amx = replace_all(amx, apple_amx_ldz_f16)
-amx = replace_all(amx, apple_amx_stz_f16)
-amx = simplify(amx)
-
-amx = set_memory(amx, "A_reg", APPLE_AMX_POOL_Y)
-amx = set_memory(amx, next(amx.find_alloc_or_arg("A_reg")), APPLE_AMX_POOL_Y) # NOTE: see above
-amx = set_memory(amx, "B_reg", APPLE_AMX_POOL_X)
-amx = replace_all(amx, apple_amx_ldy_f16)
-amx = replace_all(amx, apple_amx_ldx_f16)
-amx = replace_all(amx, apple_amx_fma16_mat)
-amx = simplify(amx)
-
-amx = reorder_stmt_forward(amx, amx.find_loop("i0"))
-amx = reorder_stmt_forward(amx, amx.find_loop("i0"))
-
-for c in amx.find_loop("i0", many=True):
-  if c.next().name() == "k2":
-    amx = fuse(amx, c, c.next())
-amx = simplify(amx)
-
-amx = divide_loop(amx, "for i0 in _:_", 4, ["i1", "i2"], perfect=True)
-amx = reorder_loops(amx, "i1 i2")
-amx = unroll_loop(amx, "for i1 in _:_")
-amx = fission(amx, amx.find_loop("i2").body()[0].after())
-amx = reorder_stmt_forward(amx, amx.find_loop("i2", many=True)[1])
-amx = reorder_stmt_forward(amx, amx.find_loop("i2", many=True)[1])
-amx = simplify(amx)
-
-for c in amx.find_loop("i2", many=True):
-  amx = fuse(amx, next(c), next(c, n=2))
-  amx = fuse(amx, c, next(c))
-for c in amx.find_loop("i2", many=True):
-  amx = reorder_stmt_forward(amx, c.body()[2])
-for c in amx.find_loop("i2", many=True):
-  amx = unroll_loop(amx, c)
+# 5. Unroll the k block so every register index is a constant.  The Z load and
+#    store loops around the k0 loop stay rolled.
+amx = unroll_loops(amx, amx.find_loop("k0"))
 amx = simplify(amx)
 
 print("=============Optimized Matmul==============")

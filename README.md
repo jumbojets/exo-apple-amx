@@ -30,10 +30,12 @@ $ ./appleamx_matmul
 ### appleamx_matmul.py performance on M1 Max
 
 ```
-Unscheduled:      0.582 gflops
-Scheduled:     2485.513 gflops (84% max)
+Unscheduled:      1.6   gflops
+Scheduled:     2796.2   gflops (94% max)
 Max:           2958.9   gflops
 ```
+
+`Max` is the single-thread `fma16` ceiling with two Z accumulators and no loads from [corsix/amx fma.md](https://github.com/corsix/amx/blob/main/fma.md). main.c times one cold call right after the CPU has written A and B; called back to back the kernel sustains about 2970 gflops, so the schedule is at the ceiling and the remaining few percent are the cold start.
 
 ### Regenerate appleamx_ops
 
@@ -54,7 +56,6 @@ $ ./appleamx_matmul  # exits non-zero if the scheduled kernel disagrees with the
 In matrix mode the Y register supplies the rows of Z and the X register the columns, so the outer product is `dst[i, j] += srcy[i] * srcx[j]`. For `C[i, j] += A[k, i] * B[k, j]` that means A goes in `APPLE_AMX_POOL_Y` and B in `APPLE_AMX_POOL_X`. Exo has no `-=`, so `fms` matches `dst[i, j] += -(srcy[i] * srcx[j])`. The `*_masked` variants take `rows`/`cols` (or `n`) size arguments and match the `for i in seq(0, N): if i < rows:` shape that `bound_and_guard` produces.
 
 ### some considerations / todos
-* get scheduled performance closer to max
 * some of the matrix stuff can be consolidated more nicely in the APPLE_AMX_POOL
 * accumulator (3rd) dimension for z pool (and maybe even x, y)?
 * mixed width / mixed precision: `fma16` accumulating into f32 needs a Z layout spanning all 64 rows plus `ldzi`/`stzi`

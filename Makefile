@@ -2,7 +2,7 @@ PYTHON ?= python3
 PIP := $(PYTHON) -m pip
 
 CPPFLAGS += -I.
-CFLAGS ?= -march=native
+CFLAGS ?= -O2 -march=native
 
 PKG_SRCS := appleamx.py setup.py pyproject.toml README.md
 
