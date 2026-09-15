@@ -4,7 +4,7 @@ PIP := $(PYTHON) -m pip
 CPPFLAGS += -I.
 CFLAGS ?= -O2 -march=native
 
-PKG_SRCS := appleamx.py setup.py pyproject.toml README.md
+PKG_SRCS := appleamx.py pyproject.toml README.md
 
 appleamx_matmul: appleamx_matmul.o main.o
 

@@ -1,3 +1,19 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "appleamx"
+version = "0.1.0"
+description = "Apple AMX register files and instructions for Exo"
+readme = "README.md"
+authors = [{ name = "James Taylor" }]
+requires-python = ">=3.9"
+dependencies = ["exo-lang>=1.0.0"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.setuptools]
+py-modules = ["appleamx", "appleamx_ops", "appleamx_pools"]
