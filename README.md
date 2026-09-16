@@ -55,11 +55,10 @@ $ ./appleamx_matmul  # exits non-zero if the scheduled kernel disagrees with the
 
 In matrix mode the Y register supplies the rows of Z and the X register the columns, so the outer product is `dst[i, j] += srcy[i] * srcx[j]`. For `C[i, j] += A[k, i] * B[k, j]` that means A goes in `APPLE_AMX_POOL_Y` and B in `APPLE_AMX_POOL_X`. Exo has no `-=`, so `fms` matches `dst[i, j] += -(srcy[i] * srcx[j])`. The `*_masked` variants take `rows`/`cols` (or `n`) size arguments and match the `for i in seq(0, N): if i < rows:` shape that `bound_and_guard` produces.
 
-Z buffers follow the layouts the matrix instructions write. An `N x N` accumulator with `N` lanes per row is spread over the 64 Z rows at a stride of `64 / N`, so up to `64 / N` of them coexist and `ldz`/`stz` move one row at a time. The one mixed-precision mode Exo can express, f16 inputs accumulated in f32 (the `*_mat_f32` variants), writes a 32x32 f32 tile whose 128-byte rows are register pairs. That tile is the whole Z file: it cannot share Z with another accumulator, it runs at the single-accumulator rate, and its rows are moved with `ldzi`/`stzi` instead of `ldz`/`stz`.
+Z buffers follow the layouts the matrix instructions write. An `N x N` accumulator with `N` lanes per row is spread over the 64 Z rows at a stride of `64 / N`, so up to `64 / N` of them coexist and `ldz`/`stz` move one row at a time. Several accumulators can share one buffer: `[m, N, N]` puts them in `m` adjacent slots, which is the shape `divide_dim` gives a staged `[m * N, N]` block. X and Y matrices already occupy consecutive rows, so they have no such dimension. The one mixed-precision mode Exo can express, f16 inputs accumulated in f32 (the `*_mat_f32` variants), writes a 32x32 f32 tile whose 128-byte rows are register pairs. That tile is the whole Z file: it cannot share Z with another accumulator, it runs at the single-accumulator rate, and its rows are moved with `ldzi`/`stzi` instead of `ldz`/`stz`.
 
 ### some considerations / todos
 * some of the matrix stuff can be consolidated more nicely in the APPLE_AMX_POOL
-* accumulator (3rd) dimension for z pool (and maybe even x, y)?
 * integers: Exo has no i16 or ui32, which rules out `mac16`'s native accumulator; `matint` mode 8 (i8 x i8 -> i32) is the one clean candidate
 * `extrv` (Z column to Y) needs column windows of Z
 * pair loads/stores of Z rows are only correct with a single accumulator, so they are not generated
