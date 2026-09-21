@@ -13,17 +13,20 @@ import gen_appleamx_ops as gen  # noqa: E402
 CTYPES = {"f16": "_Float16", "f32": "float", "f64": "double",
           "i8": "int8_t", "ui8": "uint8_t", "ui16": "uint16_t", "i32": "int32_t"}
 
-# For each op: the size-parameter values to run it with. Masked ops get a
-# partial mask and a full one (the full lane count encodes as 0 in the flag).
+# For each op: the scalar-parameter values to run it with. Masked ops get a
+# partial mask and a full one (the full lane count encodes as 0 in the flag);
+# indexed ops get a middle row and the last one.
 def cases(o):
-  sizes = [p.name for p in o.params if p.dtype is None]
-  if not sizes: return [("", {})]
-  N = o.params[len(sizes)].shape[0]  # dst lanes, which for f32 accumulation exceed lanes(dtype)
+  scalars = [p for p in o.params if p.dtype in gen.SCALARS]
+  if not scalars: return [("", {})]
+  N = scalars[0].shape[0]  # the bound, which every scalar of an op shares
+  if scalars[0].dtype == "index":
+    return [("_mid", {p.name: N // 2 + 1 for p in scalars}), ("_last", {p.name: N - 1 for p in scalars})]
   partial = {"rows": N - 1, "cols": N // 2 + 1, "n": N - 1}
-  return [("_partial", {s: partial[s] for s in sizes}), ("_full", {s: N for s in sizes})]
+  return [("_partial", {p.name: partial[p.name] for p in scalars}), ("_full", {p.name: N for p in scalars})]
 
 def tensor_param(p):
-  if p.dtype is None: return f"{p.name}: size"
+  if p.dtype in gen.SCALARS: return f"{p.name}: {p.dtype}"
   return f"{p.name}: {p.dtype}[{', '.join(map(str, p.shape))}] @ DRAM"
 
 def ref_proc_source(o):
@@ -41,21 +44,24 @@ def dense_strides(shape):
   return strides
 
 def move(instr, dst, src, shape):
-  """Exo statements copying a whole buffer row by row with a ld/st instruction."""
+  """Exo statements copying a whole buffer one register row at a time with a ld/st instruction."""
   if len(shape) == 1: return [f"  {instr}({dst}, {src})"]
-  return [f"  for r in seq(0, {shape[0]}):", f"    {instr}({dst}[r, 0:{shape[1]}], {src}[r, 0:{shape[1]}])"]
+  rows = [f"r{d}" for d in range(len(shape) - 1)]
+  window = f"[{', '.join(rows)}, 0:{shape[-1]}]"
+  body = [f"  {'  ' * d}for {r} in seq(0, {n}):" for d, (r, n) in enumerate(zip(rows, shape))]
+  return body + [f"  {'  ' * len(rows)}{instr}({dst}{window}, {src}{window})"]
 
 def staging_ops(p):
   """(load, store) instructions moving one row of register operand p; wide Z rows use ldzi/stzi."""
   name = p.mem.lower() + ("i" if p.shape[-1] > gen.lanes(p.dtype) else "")
   return f"apple_amx_ld{name}_{p.dtype}", f"apple_amx_st{name}_{p.dtype}"
 
-def test_proc_source(o, label, sizes):
-  """A proc that stages every register operand from DRAM, runs the op, and stores it back."""
+def test_proc_source(o, label, values):
+  """A proc that stages every register operand from DRAM, runs the op with the scalar values, and stores it back."""
   params, asserts, before, after, args = [], [], [], [], []
   for p in o.params:
-    if p.dtype is None:
-      args.append(str(sizes[p.name]))
+    if p.dtype in gen.SCALARS:
+      args.append(str(values[p.name]))
       continue
     params.append(tensor_param(p))
     # Exo does not assume proc arguments are dense; the instruction asserts need it.
@@ -72,9 +78,9 @@ def test_proc_source(o, label, sizes):
   body = asserts + before + [f"  {o.name}({', '.join(args)})"] + after
   return f"@proc\ndef t_{o.name}{label}({', '.join(params)}):\n" + "\n".join(body) + "\n"
 
-def driver_case(o, label, sizes):
+def driver_case(o, label, values):
   """C block that runs the reference and the test proc on the same random data."""
-  bufs = [p for p in o.params if p.dtype is not None]
+  bufs = [p for p in o.params if p.dtype not in gen.SCALARS]
   lines = ["{"]
   for p in bufs:
     n, T = 1, CTYPES[p.dtype]
@@ -83,8 +89,8 @@ def driver_case(o, label, sizes):
     lines.append(f"  alignas(128) {T} {p.name}[{n}], {p.name}_t[{n}];")
     lines.append(f"  for (size_t i = 0; i < {n}; i++) {p.name}[i] = ({T}){fill};")
     lines.append(f"  memcpy({p.name}_t, {p.name}, sizeof({p.name}));")
-  size_args = "".join(f"{sizes[p.name]}, " for p in o.params if p.dtype is None)
-  lines.append(f"  r_{o.name}(NULL, {size_args}{', '.join(p.name for p in bufs)});")
+  scalar_args = "".join(f"{values[p.name]}, " for p in o.params if p.dtype in gen.SCALARS)
+  lines.append(f"  r_{o.name}(NULL, {scalar_args}{', '.join(p.name for p in bufs)});")
   lines.append(f"  t_{o.name}{label}(NULL, {', '.join(p.name + '_t' for p in bufs)});")
   for p in bufs:
     lines.append(f'  check("{o.name}{label}", "{p.name}", {p.name}, {p.name}_t, sizeof({p.name}), sizeof({CTYPES[p.dtype]}));')
@@ -130,7 +136,7 @@ def test_every_instruction_executes_correctly():
 
   with tempfile.TemporaryDirectory() as d:
     tmp = Path(d)
-    runs = [(o, label, sizes) for o in gen.OPS for label, sizes in cases(o)]
+    runs = [(o, label, values) for o in gen.OPS for label, values in cases(o)]
     src = "from __future__ import annotations\nfrom exo import *\nfrom appleamx import *\n"
     src += "".join(ref_proc_source(o) for o in gen.OPS)
     src += "".join(test_proc_source(*run) for run in runs)
