@@ -67,6 +67,9 @@
   AMX_EXTRX((1ull << 27) | ((uint64_t)(yreg) << 20) | ((uint64_t)(xreg) << 16))
 #define AMX_EXTRY_FROM_X(yreg, xreg) \
   AMX_EXTRY((1ull << 27) | ((uint64_t)(xreg) << 20) | ((uint64_t)(yreg) << 6))
-// lane: 0 = 64-bit, 1 = 32-bit, 2 = 16-bit; only affects the write mask
+// lane: 0 = 64-bit, 1 = 32-bit, 2 = 16-bit; for extrh only the write mask, for extrv also the Z cell size
 #define AMX_EXTRH(xreg, zrow, lane) \
   AMX_EXTRX(((uint64_t)(lane) << 28) | ((uint64_t)(zrow) << 20) | (((uint64_t)(xreg) * 64) << 10))
+// zcol: the accumulator's base register + column * element bytes (row i of the accumulator is register i * bytes + base)
+#define AMX_EXTRV(yreg, zcol, lane) \
+  AMX_EXTRY(((uint64_t)(lane) << 28) | ((uint64_t)(zcol) << 20) | ((uint64_t)(yreg) * 64))

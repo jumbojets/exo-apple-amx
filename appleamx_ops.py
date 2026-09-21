@@ -717,6 +717,15 @@ def apple_amx_stz2_f16(row: index, dst: [f16][64] @ DRAM, src: [f16][2, 32, 32] 
     for j in seq(0, 32):
       dst[32 * i + j] = src[i, row, j]
 
+@instr("AMX_EXTRV(({dst_data}), ({src_data}) + ({col}) * 2, 2);")
+def apple_amx_extrv_f16(col: index, dst: [f16][32] @ APPLE_AMX_POOL_Y, src: [f16][32, 32] @ APPLE_AMX_POOL_Z):
+  assert 0 <= col
+  assert col < 32
+  assert stride(dst, 0) == 1
+  assert stride(src, 1) == 1
+  for i in seq(0, 32):
+    dst[i] = src[i, col]
+
 @instr("AMX_LDZ(&{src_data}, ({dst_data}) + ({row}) * 4, AMX_LDST_PAIR);")
 def apple_amx_ldz2_f32(row: index, dst: [f32][2, 16, 16] @ APPLE_AMX_POOL_Z, src: [f32][32] @ DRAM):
   assert 0 <= row
@@ -736,6 +745,15 @@ def apple_amx_stz2_f32(row: index, dst: [f32][32] @ DRAM, src: [f32][2, 16, 16] 
   for i in seq(0, 2):
     for j in seq(0, 16):
       dst[16 * i + j] = src[i, row, j]
+
+@instr("AMX_EXTRV(({dst_data}), ({src_data}) + ({col}) * 4, 1);")
+def apple_amx_extrv_f32(col: index, dst: [f32][16] @ APPLE_AMX_POOL_Y, src: [f32][16, 16] @ APPLE_AMX_POOL_Z):
+  assert 0 <= col
+  assert col < 16
+  assert stride(dst, 0) == 1
+  assert stride(src, 1) == 1
+  for i in seq(0, 16):
+    dst[i] = src[i, col]
 
 @instr("AMX_LDZ(&{src_data}, ({dst_data}) + ({row}) * 8, AMX_LDST_PAIR);")
 def apple_amx_ldz2_f64(row: index, dst: [f64][2, 8, 8] @ APPLE_AMX_POOL_Z, src: [f64][16] @ DRAM):
@@ -757,6 +775,15 @@ def apple_amx_stz2_f64(row: index, dst: [f64][16] @ DRAM, src: [f64][2, 8, 8] @ 
     for j in seq(0, 8):
       dst[8 * i + j] = src[i, row, j]
 
+@instr("AMX_EXTRV(({dst_data}), ({src_data}) + ({col}) * 8, 0);")
+def apple_amx_extrv_f64(col: index, dst: [f64][8] @ APPLE_AMX_POOL_Y, src: [f64][8, 8] @ APPLE_AMX_POOL_Z):
+  assert 0 <= col
+  assert col < 8
+  assert stride(dst, 0) == 1
+  assert stride(src, 1) == 1
+  for i in seq(0, 8):
+    dst[i] = src[i, col]
+
 @instr("AMX_LDZ(&{src_data}, ({dst_data}) + ({row}) * 2, AMX_LDST_PAIR);")
 def apple_amx_ldz2_ui16(row: index, dst: [ui16][2, 32, 32] @ APPLE_AMX_POOL_Z, src: [ui16][64] @ DRAM):
   assert 0 <= row
@@ -777,6 +804,15 @@ def apple_amx_stz2_ui16(row: index, dst: [ui16][64] @ DRAM, src: [ui16][2, 32, 3
     for j in seq(0, 32):
       dst[32 * i + j] = src[i, row, j]
 
+@instr("AMX_EXTRV(({dst_data}), ({src_data}) + ({col}) * 2, 2);")
+def apple_amx_extrv_ui16(col: index, dst: [ui16][32] @ APPLE_AMX_POOL_Y, src: [ui16][32, 32] @ APPLE_AMX_POOL_Z):
+  assert 0 <= col
+  assert col < 32
+  assert stride(dst, 0) == 1
+  assert stride(src, 1) == 1
+  for i in seq(0, 32):
+    dst[i] = src[i, col]
+
 @instr("AMX_LDZ(&{src_data}, ({dst_data}) + ({row}) * 4, AMX_LDST_PAIR);")
 def apple_amx_ldz2_i32(row: index, dst: [i32][2, 16, 16] @ APPLE_AMX_POOL_Z, src: [i32][32] @ DRAM):
   assert 0 <= row
@@ -796,6 +832,15 @@ def apple_amx_stz2_i32(row: index, dst: [i32][32] @ DRAM, src: [i32][2, 16, 16] 
   for i in seq(0, 2):
     for j in seq(0, 16):
       dst[16 * i + j] = src[i, row, j]
+
+@instr("AMX_EXTRV(({dst_data}), ({src_data}) + ({col}) * 4, 1);")
+def apple_amx_extrv_i32(col: index, dst: [i32][16] @ APPLE_AMX_POOL_Y, src: [i32][16, 16] @ APPLE_AMX_POOL_Z):
+  assert 0 <= col
+  assert col < 16
+  assert stride(dst, 0) == 1
+  assert stride(src, 1) == 1
+  for i in seq(0, 16):
+    dst[i] = src[i, col]
 
 @instr("AMX_FMA16(({srcy_data}) * 64, ({srcx_data}) * 64, ({dst_data}), 0);")
 def apple_amx_fma16_mat(dst: [f16][32, 32] @ APPLE_AMX_POOL_Z, srcy: [f16][32] @ APPLE_AMX_POOL_Y, srcx: [f16][32] @ APPLE_AMX_POOL_X):

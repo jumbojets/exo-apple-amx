@@ -10,6 +10,7 @@ Generated per element type (those Exo supports: f16 f32 f64 i8 ui8 ui16 i32):
   extrx / extry / extrh      register-to-register moves (Y->X, X->Y, Z row->X)
 per element type of 2 or more bytes, whose Z accumulators interleave:
   ldz2 / stz2                one row of a [2, N, N] stack of accumulators (128 bytes, 128-byte aligned)
+  extrv                      one column of an NxN accumulator to Y
 and per floating-point type:
   fma / fms / mul / zero     outer product (`_mat`) and pointwise (`_vec`)
   *_masked                   the same restricted to the first `rows` / `cols` lanes
@@ -31,9 +32,10 @@ Z_ROWS = 64
 
 MEMS = {"DRAM": "DRAM", "X": "APPLE_AMX_POOL_X", "Y": "APPLE_AMX_POOL_Y", "Z": "APPLE_AMX_POOL_Z"}
 
-# extrh lane-width field by element size; all lanes are enabled so it only
-# affects the write mask, and 1-byte types borrow the 16-bit setting.
-EXTRH_LANE_MODE = {8: 0, 4: 1, 2: 2, 1: 2}
+# extrh / extrv lane-width field by element size. extrh moves whole rows, so it only
+# affects the write mask and 1-byte types borrow the 16-bit setting; extrv reads one
+# element per lane, so it must match.
+EXTR_LANE_MODE = {8: 0, 4: 1, 2: 2, 1: 2}
 
 # A scalar parameter's dtype is its Exo kind and its shape the lane count that bounds it.
 SCALARS = ("size", "index")
@@ -43,6 +45,7 @@ OPS = []
 
 def lanes(dtype): return ROW_BYTES // TYPE_BYTES[dtype]
 def bits(dtype): return TYPE_BYTES[dtype] * 8
+def lane_mode(dtype): return EXTR_LANE_MODE[TYPE_BYTES[dtype]]
 def op(*args): OPS.append(Op(*args))
 def unit_strides(*params): return [f"stride({p}, {d}) == 1" for p, d in params]
 
@@ -92,7 +95,7 @@ for dtype in TYPE_BYTES:
          dtype, (2, N), src=pool, asserts=[f"stride(dst, 0) == {N}"])
   move(f"apple_amx_extrx_{dtype}", "AMX_EXTRX_FROM_Y(({dst_data}), ({src_data}));", dtype, (N,), dst="X", src="Y")
   move(f"apple_amx_extry_{dtype}", "AMX_EXTRY_FROM_X(({dst_data}), ({src_data}));", dtype, (N,), dst="Y", src="X")
-  move(f"apple_amx_extrh_{dtype}", f"AMX_EXTRH(({{dst_data}}), ({{src_data}}), {EXTRH_LANE_MODE[TYPE_BYTES[dtype]]});",
+  move(f"apple_amx_extrh_{dtype}", f"AMX_EXTRH(({{dst_data}}), ({{src_data}}), {lane_mode(dtype)});",
        dtype, (N,), dst="X", src="Z")
 
 # Z pair loads and stores: a register pair is one row of two adjacent accumulators (see
@@ -115,7 +118,17 @@ def z_pair_moves(dtype):
      [row, mem("dst"), regs("src")], loops([2, N], f"dst[{N} * i + j] = src[i, row, j]"),
      bounds + unit_strides(("dst", 0), ("src", 2)))
 
-for dtype in STACK_TYPES: z_pair_moves(dtype)
+# A column of an accumulator is one lane of each of its rows.
+def z_column_move(dtype):
+  N, S = lanes(dtype), z_stride(dtype)
+  col = Param("col", "index", (N,))
+  op(f"apple_amx_extrv_{dtype}", f"AMX_EXTRV(({{dst_data}}), ({{src_data}}) + ({{col}}) * {S}, {lane_mode(dtype)});",
+     [col, Param("dst", dtype, (N,), "Y"), Param("src", dtype, (N, N), "Z")], loops([N], "dst[i] = src[i, col]"),
+     ["0 <= col", f"col < {N}"] + unit_strides(("dst", 0), ("src", 1)))
+
+for dtype in STACK_TYPES:
+  z_pair_moves(dtype)
+  z_column_move(dtype)
 
 # Floating-point fused multiply-add family: kind -> (macro prefix, extra flags, Exo statement)
 ALU_KINDS = {
