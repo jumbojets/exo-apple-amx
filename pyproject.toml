@@ -16,4 +16,4 @@ classifiers = [
 ]
 
 [tool.setuptools]
-py-modules = ["appleamx", "appleamx_ops", "appleamx_pools"]
+py-modules = ["appleamx", "appleamx_ops", "appleamx_pools", "appleamx_rewrites"]

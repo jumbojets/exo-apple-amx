@@ -23,6 +23,7 @@ main.c: appleamx_matmul.c
 test: appleamx.install
 	$(PYTHON) gen_appleamx_ops.py --check
 	$(PYTHON) test_appleamx_ops.py
+	$(PYTHON) test_appleamx_rewrites.py
 
 .PHONY: clean
 clean:
