@@ -13,6 +13,7 @@ The [Apple AMX Coprocessor](https://github.com/corsix/amx) is an undocumented ac
 * appleamx/amx.h: Instruction macros from [corsix/amx](https://github.com/corsix/amx) plus named operand flags. Generated C includes it by name; `appleamx.include_dir()` is the directory to add to the compiler's include path.
 * tests/test_ops.py: Runs every generated instruction on the coprocessor and compares it against its own Exo body executed on the CPU.
 * tests/test_rewrites.py: Schedules a kernel per register-file layout with the rewrite rules and compares it against the naive kernel on the coprocessor.
+* tests/conftest.py: Compiles the procs a test needs together with a C driver that runs its cases by name on the coprocessor.
 * examples/appleamx_matmul.py: Example matmul kernel. Contains a naive matmul implementation and a scheduled one, the latter using the AMX register file and instructions defined in appleamx.
 * examples/main.c: Verifies the scheduled kernel against the naive one, then benchmarks both.
 
@@ -52,6 +53,7 @@ $ python -m appleamx._gen_ops --check  # fail if appleamx/ops.py is stale
 
 ```console
 $ make test          # every generated instruction agrees with its Exo body, every kernel the rewrite rules schedule with its naive version
+$ python -m pytest tests -k ldz  # only the instructions and kernels whose names match
 $ ./appleamx_matmul  # exits non-zero if the scheduled kernel disagrees with the naive one
 ```
 

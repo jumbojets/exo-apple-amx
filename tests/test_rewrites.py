@@ -2,17 +2,14 @@
 rules produce, and check each against its naive version on the coprocessor."""
 from __future__ import annotations
 
-import subprocess
-import tempfile
 from collections import namedtuple
 from functools import partial
-from pathlib import Path
 
-from exo import proc, compile_procs_to_strings
+import pytest
+from exo import proc
 from exo.stdlib.scheduling import *
 from exo.stdlib.stdlib import *
 
-import appleamx
 from appleamx import *
 
 CTYPES = {"f16": "_Float16", "f32": "float"}
@@ -111,58 +108,23 @@ CASES = [
 ]
 
 def driver_case(naive, scheduled, size):
-  """C block running both procs on the same random data and comparing every buffer."""
+  """C statements running both procs on the same random data and comparing every buffer."""
   scalar = next(a.name() for a in naive.args() if not a.is_tensor())
   bufs = [(a.name(), CTYPES[a.type().name.lower()], " * ".join(expr_to_string(d, {scalar: str(size)}) for d in a.shape()))
           for a in naive.args() if a.is_tensor()]
-  lines = ["{"]
+  lines = []
   for name, T, n in bufs:
     lines.append(f"  static alignas(128) {T} {name}[{n}], {name}_t[{n}];")
     lines.append(f"  for (size_t i = 0; i < {n}; i++) {name}[i] = {name}_t[i] = ({T})(rand() % 7 - 3);")
   lines.append(f"  {naive.name()}(NULL, {size}, {', '.join(name for name, _, _ in bufs)});")
   lines.append(f"  {scheduled.name()}(NULL, {size}, {', '.join(name + '_t' for name, _, _ in bufs)});")
-  for name, _, n in bufs:
-    lines.append(f'  check("{scheduled.name()}", "{name}", {name}, {name}_t, {n});')
-  lines.append("}")
+  for name, T, _ in bufs:
+    lines.append(f'  check("{scheduled.name()}", "{name}", {name}, {name}_t, sizeof({name}), sizeof({T}));')
   return "\n".join(lines)
 
-DRIVER_HEADER = """\
-#include <stdalign.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include "amx_rewrites.h"
-
-static int failures = 0;
-
-#define check(kernel, name, ref, test, n) \\
-  for (size_t i = 0; i < (n); i++) \\
-    if ((float)(ref)[i] != (float)(test)[i]) { printf("FAIL %s: %s[%zu]\\n", kernel, name, i); failures++; break; }
-
-int main() {
-  srand(1);
-"""
-
-def test_rewrite_rules_schedule_correct_kernels():
-  runs = []
-  for case in CASES:
-    scheduled = case.schedule(rename(case.naive, case.naive.name() + "_amx"))
-    for reg in case.regs: assert reg in str(scheduled), f"{scheduled.name()} lacks {reg}:\n{scheduled}"
-    runs.append((case.naive, scheduled, case.size))
-
-  with tempfile.TemporaryDirectory() as d:
-    tmp = Path(d)
-    c, h = compile_procs_to_strings([p for run in runs for p in run[:2]], "amx_rewrites.h")
-    (tmp / "amx_rewrites.c").write_text(c)
-    (tmp / "amx_rewrites.h").write_text(h)
-    driver = DRIVER_HEADER + "\n".join(driver_case(*run) for run in runs)
-    driver += '\n  printf("%d failures in %d kernels\\n", failures, ' + str(len(CASES)) + ");\n  return failures != 0;\n}\n"
-    (tmp / "driver.c").write_text(driver)
-    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", f"-I{appleamx.include_dir()}",
-                         "amx_rewrites.c", "driver.c", "-o", "driver"], cwd=tmp, capture_output=True, text=True)
-    assert cc.returncode == 0, cc.stderr
-    run = subprocess.run(["./driver"], cwd=tmp, capture_output=True, text=True)
-    print(run.stdout, end="")
-    assert run.returncode == 0, run.stdout
-
-if __name__ == "__main__":
-  test_rewrite_rules_schedule_correct_kernels()
+@pytest.mark.parametrize("case", CASES, ids=[case.naive.name() for case in CASES])
+def test_kernel(case, tmp_path, build_driver):
+  scheduled = case.schedule(rename(case.naive, case.naive.name() + "_amx"))
+  for reg in case.regs: assert reg in str(scheduled), f"{scheduled.name()} lacks {reg}:\n{scheduled}"
+  run = build_driver(tmp_path, "amx_rewrites", [case.naive, scheduled], {scheduled.name(): driver_case(case.naive, scheduled, case.size)})
+  run(scheduled.name())

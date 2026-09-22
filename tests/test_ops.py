@@ -1,9 +1,7 @@
 import importlib.util
-import subprocess
-import tempfile
-from pathlib import Path
 
-import appleamx
+import pytest
+
 from appleamx import _gen_ops as gen
 
 CTYPES = {"f16": "_Float16", "f32": "float", "f64": "double",
@@ -77,9 +75,9 @@ def case_proc_source(o, label, values):
   return f"@proc\ndef t_{o.name}{label}({', '.join(params)}):\n" + "\n".join(body) + "\n"
 
 def driver_case(o, label, values):
-  """C block that runs the reference and the test proc on the same random data."""
+  """C statements running the reference and the test proc on the same random data."""
   bufs = [p for p in o.params if p.dtype not in gen.SCALARS]
-  lines = ["{"]
+  lines = []
   for p in bufs:
     n, T = 1, CTYPES[p.dtype]
     for d in p.shape: n *= d
@@ -93,33 +91,7 @@ def driver_case(o, label, values):
   lines.append(f"  t_{o.name}{label}(NULL, {', '.join(p.name + '_t' for p in bufs)});")
   for p in bufs:
     lines.append(f'  check("{o.name}{label}", "{p.name}", {p.name}, {p.name}_t, sizeof({p.name}), sizeof({CTYPES[p.dtype]}));')
-  lines.append("}")
   return "\n".join(lines)
-
-DRIVER_HEADER = """\
-#include <stdalign.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "amx_test.h"
-
-static int failures = 0;
-
-static void check(const char *op, const char *buf, const void *ref, const void *test, size_t bytes, size_t elem) {
-  const unsigned char *r = ref, *t = test;
-  for (size_t i = 0; i < bytes; i++) {
-    if (r[i] != t[i]) {
-      printf("FAIL %s: %s differs at element %zu\\n", op, buf, i / elem);
-      failures++;
-      return;
-    }
-  }
-}
-
-int main() {
-  srand(1);
-"""
 
 def load_module(path):
   spec = importlib.util.spec_from_file_location(path.stem, path)
@@ -127,37 +99,29 @@ def load_module(path):
   spec.loader.exec_module(mod)
   return mod
 
+RUNS = {o.name + label: (o, label, values) for o in gen.OPS for label, values in cases(o)}
+
 def test_generated_file_is_current():
   assert gen.render_module() == gen.OUTPUT.read_text(), "run python -m appleamx._gen_ops"
 
-def test_every_instruction_executes_correctly():
-  from exo import compile_procs_to_strings
+@pytest.fixture(scope="module")
+def driver(request, build_driver, tmp_path_factory):
+  """Driver running each selected op against its body as a plain proc."""
+  names = [item.callspec.params["name"] for item in request.session.items if item.function is test_instruction]
+  runs = {name: RUNS[name] for name in names}
+  ops = {o.name: o for o, _, _ in runs.values()}
+  tmp = tmp_path_factory.mktemp("ops")
+  src = "from __future__ import annotations\nfrom exo import *\nfrom appleamx import *\n"
+  src += "".join(ref_proc_source(o) for o in ops.values())
+  src += "".join(case_proc_source(*run) for run in runs.values())
+  (tmp / "amx_test_procs.py").write_text(src)
+  mod = load_module(tmp / "amx_test_procs.py")
+  procs = [getattr(mod, f"r_{name}") for name in ops] + [getattr(mod, f"t_{name}") for name in runs]
+  run = build_driver(tmp, "amx_test", procs, {name: driver_case(*run) for name, run in runs.items()})
+  c = (tmp / "amx_test.c").read_text()
+  assert c.count("AMX_SET()") == c.count("AMX_CLR()") == len(runs), "one AMX_SET/AMX_CLR pair per test proc"
+  return run
 
-  with tempfile.TemporaryDirectory() as d:
-    tmp = Path(d)
-    runs = [(o, label, values) for o in gen.OPS for label, values in cases(o)]
-    src = "from __future__ import annotations\nfrom exo import *\nfrom appleamx import *\n"
-    src += "".join(ref_proc_source(o) for o in gen.OPS)
-    src += "".join(case_proc_source(*run) for run in runs)
-    (tmp / "amx_test_procs.py").write_text(src)
-    mod = load_module(tmp / "amx_test_procs.py")
-    procs = [getattr(mod, f"r_{o.name}") for o in gen.OPS]
-    procs += [getattr(mod, f"t_{o.name}{label}") for o, label, _ in runs]
-
-    c, h = compile_procs_to_strings(procs, "amx_test.h")
-    assert c.count("AMX_SET()") == c.count("AMX_CLR()") == len(runs), "one AMX_SET/AMX_CLR pair per test proc"
-    (tmp / "amx_test.c").write_text(c)
-    (tmp / "amx_test.h").write_text(h)
-    driver = DRIVER_HEADER + "\n".join(driver_case(*run) for run in runs)
-    driver += '\n  printf("%d failures in %d runs\\n", failures, ' + str(len(runs)) + ");\n  return failures != 0;\n}\n"
-    (tmp / "driver.c").write_text(driver)
-    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", f"-I{appleamx.include_dir()}",
-                         "amx_test.c", "driver.c", "-o", "driver"], cwd=tmp, capture_output=True, text=True)
-    assert cc.returncode == 0, cc.stderr
-    run = subprocess.run(["./driver"], cwd=tmp, capture_output=True, text=True)
-    print(run.stdout, end="")
-    assert run.returncode == 0, run.stdout
-
-if __name__ == "__main__":
-  test_generated_file_is_current()
-  test_every_instruction_executes_correctly()
+@pytest.mark.parametrize("name", RUNS)
+def test_instruction(driver, name):
+  driver(name)
