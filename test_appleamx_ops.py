@@ -21,7 +21,7 @@ def cases(o):
   if not scalars: return [("", {})]
   N = scalars[0].shape[0]  # the bound, which every scalar of an op shares
   if scalars[0].dtype == "index":
-    return [("_mid", {p.name: N // 2 + 1 for p in scalars}), ("_last", {p.name: N - 1 for p in scalars})]
+    return [("_mid", {p.name: N // 2 for p in scalars}), ("_last", {p.name: N - 1 for p in scalars})]
   partial = {"rows": N - 1, "cols": N // 2 + 1, "n": N - 1}
   return [("_partial", {p.name: partial[p.name] for p in scalars}), ("_full", {p.name: N for p in scalars})]
 
@@ -51,9 +51,11 @@ def move(instr, dst, src, shape):
   body = [f"  {'  ' * d}for {r} in seq(0, {n}):" for d, (r, n) in enumerate(zip(rows, shape))]
   return body + [f"  {'  ' * len(rows)}{instr}({dst}{window}, {src}{window})"]
 
+WIDE_MOVES = {1: "", 2: "i", 4: "q"}  # Z row move suffix by registers per row
+
 def staging_ops(p):
-  """(load, store) instructions moving one row of register operand p; wide Z rows use ldzi/stzi."""
-  name = p.mem.lower() + ("i" if p.shape[-1] > gen.lanes(p.dtype) else "")
+  """(load, store) instructions moving one row of register operand p."""
+  name = p.mem.lower() + WIDE_MOVES[p.shape[-1] // gen.lanes(p.dtype)]
   return f"apple_amx_ld{name}_{p.dtype}", f"apple_amx_st{name}_{p.dtype}"
 
 def test_proc_source(o, label, values):
@@ -85,7 +87,8 @@ def driver_case(o, label, values):
   for p in bufs:
     n, T = 1, CTYPES[p.dtype]
     for d in p.shape: n *= d
-    fill = "(rand() % 7 - 3)" if p.dtype in gen.FP_TYPES else "rand()"
+    # values whose products and sums stay exact
+    fill = "(rand() % 7 - 3)" if p.dtype in gen.FP_TYPES else "(rand() - RAND_MAX / 2)"
     lines.append(f"  alignas(128) {T} {p.name}[{n}], {p.name}_t[{n}];")
     lines.append(f"  for (size_t i = 0; i < {n}; i++) {p.name}[i] = ({T}){fill};")
     lines.append(f"  memcpy({p.name}_t, {p.name}, sizeof({p.name}));")

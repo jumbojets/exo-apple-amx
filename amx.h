@@ -73,3 +73,21 @@
 // zcol: the accumulator's base register + column * element bytes (row i of the accumulator is register i * bytes + base)
 #define AMX_EXTRV(yreg, zcol, lane) \
   AMX_EXTRY(((uint64_t)(lane) << 28) | ((uint64_t)(zcol) << 20) | ((uint64_t)(yreg) * 64))
+
+// matint mode 8, lane width 10: an i8 outer product accumulated into i32
+#define AMX_MATINT_MAC8_I32 ((8ull << 47) | (10ull << 42))
+#define AMX_MATINT_X_SIGNED (1ull << 63)
+#define AMX_MATINT_Y_SIGNED (1ull << 26)
+#define AMX_MATINT_ZERO_Z (3ull << 32)  // write 0 instead of the result
+
+// ldz / stz of one 256-byte row of the mode 8 tile
+static inline void amx_ldzq(const int32_t *src, uint64_t reg) {
+  int32_t t[4][16];
+  for (int j = 0; j < 64; j++) t[j % 4][j / 4] = src[j];
+  for (int q = 0; q < 4; q++) AMX_LDZ(t[q], reg + q, 0);
+}
+static inline void amx_stzq(int32_t *dst, uint64_t reg) {
+  int32_t t[4][16];
+  for (int q = 0; q < 4; q++) AMX_STZ(t[q], reg + q, 0);
+  for (int j = 0; j < 64; j++) dst[j] = t[j % 4][j / 4];
+}

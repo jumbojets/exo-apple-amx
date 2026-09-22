@@ -138,28 +138,27 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
   stack [m, N, N] is m adjacent slots, whose rows share register pairs, which
   is what the pair loads and stores of Z move.
 
-  `fma16` can also accumulate into f32. Its 32x32 f32 tile has 128-byte rows,
-  each the register pair (2j, 2j + 1) with the even lanes in the even
-  register, which is the layout `ldzi` / `stzi` move. Wide rows occupy
-  consecutive pairs, so the tile takes the whole file and cannot coexist
-  with any other Z buffer."""
+  Wide rows, the 32x32 f32 tile of `fma16` into f32 and the 16x64 i32 tile
+  of `matint` mode 8, are consecutive register pairs or quads moved by
+  `ldzi` / `stzi` and `ldzq` / `stzq`; either tile takes the whole file."""
   NUM_ROWS = 64
 
   @classmethod
-  def is_wide(cls, prim_type, n_cols):
-    """Whether a row of n_cols elements is a register pair rather than one register."""
-    return n_cols * cls.CTYPE_BYTES[prim_type] == 2 * cls.ROW_BYTES
+  def row_regs(cls, prim_type, n_cols):
+    """Registers per row of n_cols elements."""
+    return n_cols * cls.CTYPE_BYTES[prim_type] // cls.ROW_BYTES
 
   @classmethod
   def rows_for(cls, prim_type, dims, srcinfo):
-    """64-byte rows are placed by `stack_rows`; 128-byte rows are consecutive register pairs."""
-    if not cls.is_wide(prim_type, dims[-1]):
+    """64-byte rows are placed by `stack_rows`; wider rows are consecutive register pairs or quads."""
+    regs = cls.row_regs(prim_type, dims[-1])
+    if regs <= 1:
       return super().rows_for(prim_type, dims, srcinfo)
     n_rows = math.prod(dims[:-1])
-    rows = cls.find_free_run(2 * n_rows, step=2)
+    rows = cls.find_free_run(regs * n_rows, step=regs)
     if rows is None:
       raise MemGenError(
-        f"{srcinfo}: not enough free rows in {cls.__name__} for {n_rows} 128-byte rows "
+        f"{srcinfo}: not enough free rows in {cls.__name__} for {n_rows} {regs * cls.ROW_BYTES}-byte rows "
         f"(live buffers: {', '.join(cls.row_dict) or 'none'})")
     return rows
 
@@ -179,10 +178,11 @@ class APPLE_AMX_POOL_Z(_APPLE_AMX_POOL):
 
   @classmethod
   def reg_strides(cls, basetyp):
-    """Wide rows are consecutive register pairs; otherwise accumulator rows are 64 // N apart and stack slots adjacent."""
+    """Wide rows are consecutive register pairs or quads; otherwise accumulator rows are 64 // N apart and stack slots adjacent."""
     shape = [d.val for d in basetyp.shape()]
     if len(shape) == 1: return []
-    if cls.is_wide(basetyp.basetype().ctype(), shape[-1]):
-      return ["2"] if len(shape) == 2 else [str(2 * shape[-2]), "2"]
+    regs = cls.row_regs(basetyp.basetype().ctype(), shape[-1])
+    if regs > 1:
+      return [str(regs)] if len(shape) == 2 else [str(regs * shape[-2]), str(regs)]
     stride = str(cls.NUM_ROWS // shape[-2])
     return [stride] if len(shape) == 2 else ["1", stride]

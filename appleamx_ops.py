@@ -1360,3 +1360,35 @@ def apple_amx_stzi_f32(dst: [f32][32] @ DRAM, src: [f32][32] @ APPLE_AMX_POOL_Z)
   assert stride(src, 0) == 1
   for i in seq(0, 32):
     dst[i] = src[i]
+
+@instr("AMX_MATINT(({srcy_data}) * 64 + ({k}), ({srcx_data}) * 64, ({dst_data}), AMX_MATINT_MAC8_I32 | AMX_MATINT_X_SIGNED | AMX_MATINT_Y_SIGNED);")
+def apple_amx_mac8_mat_i32(k: index, dst: [i32][16, 64] @ APPLE_AMX_POOL_Z, srcy: [i8][64] @ APPLE_AMX_POOL_Y, srcx: [i8][64] @ APPLE_AMX_POOL_X):
+  assert 0 <= k
+  assert k < 4
+  assert stride(dst, 1) == 1
+  assert stride(srcy, 0) == 1
+  assert stride(srcx, 0) == 1
+  for i in seq(0, 16):
+    for j in seq(0, 64):
+      dst[i, j] += srcy[4 * i + k] * srcx[j]
+
+@instr("AMX_MATINT(0, 0, ({dst_data}), AMX_MATINT_MAC8_I32 | AMX_MATINT_ZERO_Z);")
+def apple_amx_zero8_mat_i32(dst: [i32][16, 64] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 1) == 1
+  for i in seq(0, 16):
+    for j in seq(0, 64):
+      dst[i, j] = 0
+
+@instr("amx_ldzq(&{src_data}, ({dst_data}));")
+def apple_amx_ldzq_i32(dst: [i32][64] @ APPLE_AMX_POOL_Z, src: [i32][64] @ DRAM):
+  assert stride(dst, 0) == 1
+  assert stride(src, 0) == 1
+  for i in seq(0, 64):
+    dst[i] = src[i]
+
+@instr("amx_stzq(&{dst_data}, ({src_data}));")
+def apple_amx_stzq_i32(dst: [i32][64] @ DRAM, src: [i32][64] @ APPLE_AMX_POOL_Z):
+  assert stride(dst, 0) == 1
+  assert stride(src, 0) == 1
+  for i in seq(0, 64):
+    dst[i] = src[i]
