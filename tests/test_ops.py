@@ -1,14 +1,10 @@
 import importlib.util
-import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
-
-import gen_appleamx_ops as gen  # noqa: E402
+import appleamx
+from appleamx import _gen_ops as gen
 
 CTYPES = {"f16": "_Float16", "f32": "float", "f64": "double",
           "i8": "int8_t", "ui8": "uint8_t", "ui16": "uint16_t", "i32": "int32_t"}
@@ -58,7 +54,7 @@ def staging_ops(p):
   name = p.mem.lower() + WIDE_MOVES[p.shape[-1] // gen.lanes(p.dtype)]
   return f"apple_amx_ld{name}_{p.dtype}", f"apple_amx_st{name}_{p.dtype}"
 
-def test_proc_source(o, label, values):
+def case_proc_source(o, label, values):
   """A proc that stages every register operand from DRAM, runs the op with the scalar values, and stores it back."""
   params, asserts, before, after, args = [], [], [], [], []
   for p in o.params:
@@ -132,7 +128,7 @@ def load_module(path):
   return mod
 
 def test_generated_file_is_current():
-  assert gen.render_module() == gen.OUTPUT.read_text(), "run gen_appleamx_ops.py"
+  assert gen.render_module() == gen.OUTPUT.read_text(), "run python -m appleamx._gen_ops"
 
 def test_every_instruction_executes_correctly():
   from exo import compile_procs_to_strings
@@ -142,7 +138,7 @@ def test_every_instruction_executes_correctly():
     runs = [(o, label, values) for o in gen.OPS for label, values in cases(o)]
     src = "from __future__ import annotations\nfrom exo import *\nfrom appleamx import *\n"
     src += "".join(ref_proc_source(o) for o in gen.OPS)
-    src += "".join(test_proc_source(*run) for run in runs)
+    src += "".join(case_proc_source(*run) for run in runs)
     (tmp / "amx_test_procs.py").write_text(src)
     mod = load_module(tmp / "amx_test_procs.py")
     procs = [getattr(mod, f"r_{o.name}") for o in gen.OPS]
@@ -155,10 +151,8 @@ def test_every_instruction_executes_correctly():
     driver = DRIVER_HEADER + "\n".join(driver_case(*run) for run in runs)
     driver += '\n  printf("%d failures in %d runs\\n", failures, ' + str(len(runs)) + ");\n  return failures != 0;\n}\n"
     (tmp / "driver.c").write_text(driver)
-    shutil.copy(HERE / "amx.h", tmp / "amx.h")
-
-    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", "amx_test.c", "driver.c", "-o", "driver"],
-                        cwd=tmp, capture_output=True, text=True)
+    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", f"-I{appleamx.include_dir()}",
+                         "amx_test.c", "driver.c", "-o", "driver"], cwd=tmp, capture_output=True, text=True)
     assert cc.returncode == 0, cc.stderr
     run = subprocess.run(["./driver"], cwd=tmp, capture_output=True, text=True)
     print(run.stdout, end="")

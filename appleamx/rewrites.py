@@ -11,14 +11,16 @@ from exo.stdlib.scheduling import (SchedulingError, divide_dim, divide_loop, mul
                                    rearrange_dim, set_memory, simplify, stage_mem)
 from exo.stdlib.stdlib import replace_all_stmts
 
-import appleamx_ops
-from appleamx_pools import APPLE_AMX_POOL_X, APPLE_AMX_POOL_Y, APPLE_AMX_POOL_Z
+from . import ops
+from .pools import APPLE_AMX_POOL_X, APPLE_AMX_POOL_Y, APPLE_AMX_POOL_Z
+
+__all__ = ["stage_x", "stage_y", "stage_z", "replace_all_amx"]
 
 LANES = {ExoType.F16: 32, ExoType.F32: 16, ExoType.F64: 8,
          ExoType.I8: 64, ExoType.UI8: 64, ExoType.UI16: 32, ExoType.I32: 16}
 POOLS = (APPLE_AMX_POOL_X, APPLE_AMX_POOL_Y, APPLE_AMX_POOL_Z)
 # Pair moves are left out: their DRAM side must be 128-byte aligned, which Exo cannot check.
-OPS = [op for op in vars(appleamx_ops).values()
+OPS = [op for op in vars(ops).values()
        if isinstance(op, Procedure) and op.is_instr() and "AMX_LDST_PAIR" not in op.get_instr()]
 
 def _lanes(typ):

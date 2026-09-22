@@ -1,19 +1,29 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "appleamx"
-version = "0.1.0"
+name = "exo-apple-amx"
 description = "Apple AMX register files and instructions for Exo"
 readme = "README.md"
+license = "MIT"
 authors = [{ name = "James Taylor" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = ["exo-lang>=1.0.0"]
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
-]
+dynamic = ["version"]
+classifiers = ["Programming Language :: Python :: 3"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/jumbojets/exo-apple-amx"
 
 [tool.setuptools]
-py-modules = ["appleamx", "appleamx_ops", "appleamx_pools", "appleamx_rewrites"]
+packages = ["appleamx"]
+
+[tool.setuptools.package-data]
+appleamx = ["amx.h"]
+
+[tool.setuptools.dynamic]
+version = { attr = "appleamx.__version__" }

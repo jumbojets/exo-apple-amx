@@ -2,7 +2,6 @@
 rules produce, and check each against its naive version on the coprocessor."""
 from __future__ import annotations
 
-import shutil
 import subprocess
 import tempfile
 from collections import namedtuple
@@ -13,9 +12,9 @@ from exo import proc, compile_procs_to_strings
 from exo.stdlib.scheduling import *
 from exo.stdlib.stdlib import *
 
+import appleamx
 from appleamx import *
 
-HERE = Path(__file__).parent
 CTYPES = {"f16": "_Float16", "f32": "float"}
 
 # C[i, j] += A[k, i] * B[k, j]: two 32x32 f16 accumulators stacked, one beside the other,
@@ -158,10 +157,8 @@ def test_rewrite_rules_schedule_correct_kernels():
     driver = DRIVER_HEADER + "\n".join(driver_case(*run) for run in runs)
     driver += '\n  printf("%d failures in %d kernels\\n", failures, ' + str(len(CASES)) + ");\n  return failures != 0;\n}\n"
     (tmp / "driver.c").write_text(driver)
-    shutil.copy(HERE / "amx.h", tmp / "amx.h")
-
-    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", "amx_rewrites.c", "driver.c", "-o", "driver"],
-                        cwd=tmp, capture_output=True, text=True)
+    cc = subprocess.run(["cc", "-march=native", "-O1", "-Wall", "-Werror", f"-I{appleamx.include_dir()}",
+                         "amx_rewrites.c", "driver.c", "-o", "driver"], cwd=tmp, capture_output=True, text=True)
     assert cc.returncode == 0, cc.stderr
     run = subprocess.run(["./driver"], cwd=tmp, capture_output=True, text=True)
     print(run.stdout, end="")

@@ -2,19 +2,15 @@ import math
 
 from exo.core.memory import MemGenError, StaticMemory, generate_offset
 
+__all__ = ["APPLE_AMX_POOL_X", "APPLE_AMX_POOL_Y", "APPLE_AMX_POOL_Z"]
+
 class _AMXState:
   """AMX_SET / AMX_CLR bookkeeping shared by the X, Y and Z pools: the state is
   set up on the first allocation and torn down once every pool is empty again."""
 
   def __init__(self):
     self.pools = []
-    self.header_emitted = False
     self.is_active = False
-
-  def header(self):
-    if self.header_emitted: return ""
-    self.header_emitted = True
-    return '#include "amx.h"'
 
   def set_if_inactive(self):
     if self.is_active: return ""
@@ -51,7 +47,7 @@ class _APPLE_AMX_POOL(StaticMemory):
       _amx.pools.append(cls)
 
   @classmethod
-  def global_(cls): return _amx.header()
+  def global_(cls): return '#include "amx.h"'  # one include per pool used; amx.h has #pragma once
   @classmethod
   def can_read(cls): return False
 
