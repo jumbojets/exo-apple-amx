@@ -14,8 +14,10 @@ The [Apple AMX Coprocessor](https://github.com/corsix/amx) is an undocumented ac
 * tests/test_ops.py: Runs every generated instruction on the coprocessor and compares it against its own Exo body executed on the CPU.
 * tests/test_rewrites.py: Schedules a kernel per register-file layout with the rewrite rules and compares it against the naive kernel on the coprocessor.
 * tests/conftest.py: Compiles the procs a test needs together with a C driver that runs its cases by name on the coprocessor.
-* examples/appleamx_matmul.py: Example matmul kernel. Contains a naive matmul implementation and a scheduled one, the latter using the AMX register file and instructions defined in appleamx.
-* examples/main.c: Verifies the scheduled kernel against the naive one, then benchmarks both.
+* examples/matmul.py: Example matmul kernel. Contains a naive matmul implementation and a scheduled one, the latter using the AMX register file and instructions defined in appleamx.
+* examples/matmul_i8.py: The same for i8 inputs accumulated in i32, the `matint` mode whose tile fills the Z file.
+* examples/matmul_scaled.py: A matmul with a per-column scale applied in registers, scheduled entirely with the rewrite rules.
+* examples/*_main.c: Verifies each scheduled kernel against its naive version, then benchmarks both.
 
 ### Install
 
@@ -25,14 +27,16 @@ $ pip install .
 
 The distribution is `exo-apple-amx`; import it as `appleamx`.
 
-### Run examples/appleamx_matmul.py
+### Run the examples
 
 ```console
-$ make
-$ ./appleamx_matmul
+$ make              # every examples/*.py, linked with its *_main.c, into build/
+$ ./build/matmul
+$ ./build/matmul_i8
+$ ./build/matmul_scaled
 ```
 
-### appleamx_matmul.py performance on M1 Max
+### matmul.py performance on M1 Max
 
 ```
 Unscheduled:      1.6   gflops
@@ -40,7 +44,7 @@ Scheduled:     2796.2   gflops (94% max)
 Max:           2958.9   gflops
 ```
 
-`Max` is the single-thread `fma16` ceiling with two Z accumulators and no loads from [corsix/amx fma.md](https://github.com/corsix/amx/blob/main/fma.md). main.c times one cold call right after the CPU has written A and B; called back to back the kernel sustains about 2970 gflops, so the schedule is at the ceiling and the remaining few percent are the cold start.
+`Max` is the single-thread `fma16` ceiling with two Z accumulators and no loads from [corsix/amx fma.md](https://github.com/corsix/amx/blob/main/fma.md). Its driver times one cold call right after the CPU has written A and B; called back to back the kernel sustains about 2970 gflops, so the schedule is at the ceiling and the remaining few percent are the cold start.
 
 ### Regenerate appleamx/ops.py
 
@@ -54,7 +58,7 @@ $ python -m appleamx._gen_ops --check  # fail if appleamx/ops.py is stale
 ```console
 $ make test          # every generated instruction agrees with its Exo body, every kernel the rewrite rules schedule with its naive version
 $ python -m pytest tests -k ldz  # only the instructions and kernels whose names match
-$ ./appleamx_matmul  # exits non-zero if the scheduled kernel disagrees with the naive one
+$ ./build/matmul  # each example exits non-zero if its scheduled kernel disagrees with the naive one
 ```
 
 ### Instruction conventions

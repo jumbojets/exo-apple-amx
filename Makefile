@@ -2,24 +2,33 @@ PYTHON ?= python3
 PIP := $(PYTHON) -m pip
 EXOCC ?= exocc
 
-CPPFLAGS += -I. -Iappleamx
+OUT := build
+CPPFLAGS += -I$(OUT) -Iappleamx
 CFLAGS ?= -O2 -march=native
 
 PKG_SRCS := $(wildcard appleamx/*.py)
+EXAMPLES := $(addprefix $(OUT)/,$(basename $(notdir $(wildcard examples/*.py))))
 
-appleamx_matmul: appleamx_matmul.o main.o
+.PHONY: all
+all: $(EXAMPLES)
+
+$(EXAMPLES): %: %.o %_main.o
 
 appleamx.install: pyproject.toml README.md
 	$(PIP) install -e '.[test]'
 	@touch $@
 
-appleamx_matmul.c: examples/appleamx_matmul.py $(PKG_SRCS) appleamx.install
-	$(EXOCC) -o . --stem $(*F) $<
+.SECONDARY:  # keep the generated .c and .h
+$(OUT)/%.c $(OUT)/%.h: examples/%.py $(PKG_SRCS) appleamx.install | $(OUT)
+	$(EXOCC) -o $(OUT) --stem $* $<
 
-appleamx_matmul.o: appleamx/amx.h
+$(EXAMPLES:=.o): appleamx/amx.h
 
-main.o: examples/main.c appleamx_matmul.c
+$(OUT)/%_main.o: examples/%_main.c $(OUT)/%.h
 	$(COMPILE.c) $(OUTPUT_OPTION) $<
+
+$(OUT):
+	mkdir -p $@
 
 .PHONY: test
 test: appleamx.install
@@ -28,5 +37,4 @@ test: appleamx.install
 
 .PHONY: clean
 clean:
-	$(RM) appleamx_matmul appleamx_matmul.[cdh] *.o
-	$(RM) -r __pycache__ appleamx/__pycache__ tests/__pycache__ .pytest_cache
+	$(RM) -r $(OUT) __pycache__ appleamx/__pycache__ examples/__pycache__ tests/__pycache__ .pytest_cache

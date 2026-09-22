@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "appleamx_matmul.h"
+#include "matmul.h"
 
 #define K 2048
 
