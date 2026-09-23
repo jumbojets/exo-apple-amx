@@ -9,13 +9,28 @@
 #include "appleamx_matmul.h"
 
 #define K 2048
+#define K_VERIFY 4
 
 static alignas(64) _Float16 A[K * 8 * 64];
 static alignas(64) _Float16 B[K * 8 * 32];
 static alignas(64) _Float16 C[64 * 32];
+static _Float16 C_expected[64 * 32];
 
 static inline _Float16 rand_float16() {
   return (_Float16)(rand() / ((double)RAND_MAX + 1));
+}
+
+// Small integers keep every f16 product and sum exact
+int count_mismatches() {
+  for (size_t i = 0; i < K_VERIFY * 8 * 64; i++) A[i] = (_Float16)(rand() % 5 - 2);
+  for (size_t i = 0; i < K_VERIFY * 8 * 32; i++) B[i] = (_Float16)(rand() % 5 - 2);
+  memset(C, 0, sizeof(C));
+  memset(C_expected, 0, sizeof(C_expected));
+  rank_kx8_reduce_64x32(NULL, K_VERIFY, A, B, C_expected);
+  rank_kx8_reduce_64x32_scheduled_appleamx(NULL, K_VERIFY, A, B, C);
+  int mismatches = 0;
+  for (size_t i = 0; i < 64 * 32; i++) mismatches += C[i] != C_expected[i];
+  return mismatches;
 }
 
 void initialize() {
@@ -40,6 +55,12 @@ double benchmark(void (*f)(void *c, int_fast32_t, const _Float16*, const _Float1
 
 int main() {
   srand(time(NULL));
+
+  int mismatches = count_mismatches();
+  if (mismatches) {
+    printf("Scheduled result is wrong in %d of %d entries\n", mismatches, 64 * 32);
+    return 1;
+  }
 
   double unscheduled_gflops = benchmark(rank_kx8_reduce_64x32);
   double scheduled_gflops = benchmark(rank_kx8_reduce_64x32_scheduled_appleamx);

@@ -39,3 +39,23 @@
 #define AMX_MATINT(y, x, z, flags) AMX_ALU(20, y, x, z, flags)
 #define AMX_MATFP(y, x, z, flags)  AMX_ALU(21, y, x, z, flags)
 #define AMX_GENLUT(src, flags)     AMX_OP_GPR(22, ((uint64_t)(src)) | (flags))
+
+// extrx and extry copy a whole y register to x and x to y
+#define AMX_EXTRX_COPY(x, y) AMX_EXTRX(((uint64_t)(x) << 16) | ((uint64_t)(y) << 20) | (1ull << 27))
+#define AMX_EXTRY_COPY(y, x) AMX_EXTRY(((uint64_t)(y) << 6) | ((uint64_t)(x) << 20) | (1ull << 27))
+// extrh copies a z row and extrv a z column to byte offset dst of x (or y with AMX_TO_Y)
+#define AMX_EXTRH(dst, z, flags) AMX_EXTRX(((uint64_t)(dst)) | ((uint64_t)(z) << 20) | (1ull << 26) | (flags))
+#define AMX_EXTRV(dst, z, flags) AMX_EXTRY(((uint64_t)(dst)) | ((uint64_t)(z) << 20) | (1ull << 26) | (flags))
+
+#define AMX_VECTOR (1ull << 63)                                    // fma/fms: pointwise instead of outer product
+#define AMX_SKIP_X (1ull << 29)                                    // fma/fms: without the x input
+#define AMX_SKIP_Y (1ull << 28)                                    // fma/fms: without the y input
+#define AMX_SKIP_Z (1ull << 27)                                    // fma/fms: without the z input
+#define AMX_ALU_MODE(m) ((uint64_t)(m) << 47)                      // vecfp/matfp/vecint/matint: operation
+#define AMX_LANE_WIDTH(w) ((uint64_t)(w) << 42)                    // vecfp/matfp/vecint/matint: element types
+#define AMX_BROADCAST_Y(n) ((1ull << 38) | ((uint64_t)(n) << 32))  // vecfp/vecint: y lane n in every lane
+#define AMX_TO_Y (1ull << 10)                                      // extrh/extrv: to y instead of x
+#define AMX_EXTR_8BIT 0ull                                         // extrh/extrv: lane width
+#define AMX_EXTR_16BIT (1ull << 63)
+#define AMX_EXTR_32BIT (8ull << 11)
+#define AMX_EXTR_64BIT ((1ull << 63) | (1ull << 11))

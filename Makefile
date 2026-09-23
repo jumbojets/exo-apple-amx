@@ -23,3 +23,7 @@ main.c: appleamx_matmul.c
 clean:
 	$(RM) appleamx_matmul appleamx_matmul.[cdh] *.o exo_demo
 	$(RM) -r __pycache__/
+
+.PHONY: test
+test:
+	$(PYTHON) -m pytest
