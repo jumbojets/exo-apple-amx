@@ -39,3 +39,5 @@
 #define AMX_MATINT(y, x, z, flags) AMX_ALU(20, y, x, z, flags)
 #define AMX_MATFP(y, x, z, flags)  AMX_ALU(21, y, x, z, flags)
 #define AMX_GENLUT(src, flags)     AMX_OP_GPR(22, ((uint64_t)(src)) | (flags))
+#define AMX_EXTRH(gpr)             AMX_OP_GPR(8, gpr)
+#define AMX_EXTRV(gpr)             AMX_OP_GPR(9, gpr)

@@ -76,12 +76,12 @@ amx = replace_all(amx, apple_amx_ldz_f16)
 amx = replace_all(amx, apple_amx_stz_f16)
 amx = simplify(amx)
 
-amx = set_memory(amx, "A_reg", APPLE_AMX_POOL_X)
-amx = set_memory(amx, next(amx.find_alloc_or_arg("A_reg")), APPLE_AMX_POOL_X) # NOTE: see above
-amx = set_memory(amx, "B_reg", APPLE_AMX_POOL_Y)
+amx = set_memory(amx, "A_reg", APPLE_AMX_POOL_Y)
+amx = set_memory(amx, next(amx.find_alloc_or_arg("A_reg")), APPLE_AMX_POOL_Y) # NOTE: see above
+amx = set_memory(amx, "B_reg", APPLE_AMX_POOL_X)
 amx = replace_all(amx, apple_amx_ldx_f16)
 amx = replace_all(amx, apple_amx_ldy_f16)
-amx = replace_all(amx, apple_amx_fma16_mat)
+amx = replace_all(amx, apple_amx_fma_mat_f16)
 amx = simplify(amx)
 
 amx = reorder_stmt_forward(amx, amx.find_loop("i0"))
